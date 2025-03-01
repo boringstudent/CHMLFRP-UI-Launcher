@@ -44,12 +44,12 @@ CUL顾名思义为CHMLFRP-UI-Launcher
 
 ---
 
-## **以下为chmlfrp的api文档**
+## **chmlfrp有关链接**
 ### ChmlFrp-v3控制面板链接：[http://v3.chmlfrp.com](http://v3.chmlfrp.com)
 
 开源链接：[https://github.com/TechCat-Team/ChmlFrp-Panel-v3](https://github.com/TechCat-Team/ChmlFrp-Panel-v3)
 
-更多TechCat开源代码请前往：[https://github.com/orgs/TechCat-Team](https://github.com/orgs/TechCat-Team)
+更多的TechCat开源代码请前往：[https://github.com/orgs/TechCat-Team](https://github.com/orgs/TechCat-Team)
 
 ---
 
