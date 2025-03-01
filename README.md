@@ -17,8 +17,8 @@ CUL顾名思义为CHMLFRP-UI-Launcher
 | ------- | ------- |
 | 1 | 将ip工具和ping工具合并为“百宝箱”并加入dns防污染和ddns |
 | 2 | 加入模版管理模块 |
-| 3 | 可能的更新检测 |
-| 7 | 可能的web管理端 |
+| 3 | 更新检测 |
+| 7 | 可能的隧道离线消息推送 |
 
 **模版管理模块**
 
@@ -58,6 +58,8 @@ CUL顾名思义为CHMLFRP-UI-Launcher
 
 这是官方api v2文档[https://docs.apiv2.chmlfrp.com](https://docs.apiv2.chmlfrp.com)
 
+CUL-api文档[https://culapi.apifox.cn](https://culapi.apifox.cn)
+
 ## chmlfrp官方bug链接
 [http://bug.chmlfrp.com](http://bug.chmlfrp.com)
 
@@ -80,5 +82,10 @@ CUL顾名思义为CHMLFRP-UI-Launcher
 |--------|------|----------|
 | **[pywin32](https://github.com/mhammond/pywin32)** | [Python Software Foundation License](https://docs.python.org/3/license.html) | `Mark Hammond` | 
 | **[win32security](https://pypi.org/project/pywin32/)** | (同上) | (同上) |
+
+### 代码构建
+| 库名称 | 协议 | 项目链接 |
+|--------|------|----------|
+| **[nuitka](https://nuitka.net/)** | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) | `Kay Hayen` | Python 到 C++ 的编译器 |
 
 ---
