@@ -4,49 +4,35 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from typing import Tuple
+import html
 
 def get_computer_name() -> str:
-    """获取计算机名称"""
     return socket.gethostname()
 
-def get_current_time() -> str:
-    """获取当前格式化时间"""
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def get_current_time(format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
+    return datetime.now().strftime(format_str)
 
 def auto_detect_config(email: str) -> Tuple[str, int]:
-    """
-    自动识别邮箱配置
-    返回 (smtp_server, port)
-    """
     domain = email.split('@')[-1].lower()
     
+    # 扩展支持的邮箱配置
     config_map = {
-    'qq.com': ('smtp.qq.com', 465),
-    '163.com': ('smtp.163.com', 465),
-    'gmail.com': ('smtp.gmail.com', 465),
-    'outlook.com': ('smtp.office365.com', 587),
-    'hotmail.com': ('smtp.office365.com', 587),
-    'yahoo.com': ('smtp.mail.yahoo.com', 465),
-    'aliyun.com': ('smtp.aliyun.com', 465),
-    '126.com': ('smtp.126.com', 465),
-    'foxmail.com': ('smtp.exmail.qq.com', 465),
-    'protonmail.com': ('smtp.protonmail.com', 465),
-    'icloud.com': ('smtp.mail.me.com', 587),
-    'zoho.com': ('smtp.zoho.com', 465),
-    'aol.com': ('smtp.aol.com', 465),
-    'mail.com': ('smtp.mail.com', 465),
-    'tutanota.com': ('smtp.tutanota.com', 465),
-    'sina.com': ('smtp.sina.com', 465),
-    'sohu.com': ('smtp.sohu.com', 465),
-    'yeah.net': ('smtp.yeah.net', 465),
-    '21cn.com': ('smtp.21cn.com', 465),
-    'tom.com': ('smtp.tom.com', 465),
-    'vip.qq.com': ('smtp.vip.qq.com', 465),
-    '263.net': ('smtp.263.net', 465),
-}
+        'qq.com': ('smtp.qq.com', 465),
+        '163.com': ('smtp.163.com', 465),
+        'aliyun.com': ('smtp.aliyun.com', 465),
+        '126.com': ('smtp.126.com', 465),
+        'foxmail.com': ('smtp.exmail.qq.com', 465),
+        'sina.com': ('smtp.sina.com', 465),
+        'sohu.com': ('smtp.sohu.com', 465),
+        'yeah.net': ('smtp.yeah.net', 465),
+        '21cn.com': ('smtp.21cn.com', 465),
+        'vip.qq.com': ('smtp.vip.qq.com', 465),
+        '263.net': ('smtp.263.net', 465),
+        'exmail.qq.com': ('smtp.exmail.qq.com', 465)
+    }
     
     for key, value in config_map.items():
-        if domain == key:
+        if domain.endswith(key):  # 支持子域名（如 exmail.qq.com 的子域名）
             return value
     
     if domain.endswith('.com') and 'exmail' in domain:
@@ -56,36 +42,34 @@ def auto_detect_config(email: str) -> Tuple[str, int]:
 
 def send_email(smtp_server: str, port: int, sender_email: str, 
               password: str, receiver_email: str, subject: str, body: str) -> Tuple[bool, str]:
-    """
-    发送邮件核心函数
-    返回 (是否成功, 描述信息)
-    """
+
     message = MIMEMultipart()
     message["From"] = sender_email
     message["To"] = receiver_email
     message["Subject"] = subject
     
-    # 修复HTML实体问题
-    clean_body = body.replace("&ldquo;", "&ldquo;").replace("&rdquo;", "&rdquo;")
+    # 使用 html.unescape 替换 HTML 实体
+    clean_body = html.unescape(body)
     message.attach(MIMEText(clean_body, "plain", "utf-8"))
 
     try:
-        # 自动选择加密方式
+        # 根据端口号选择加密方式
+        server = None
         if port == 465:
-            with smtplib.SMTP_SSL(smtp_server, port, timeout=15) as server:
-                server.login(sender_email, password)
-                server.sendmail(sender_email, receiver_email, message.as_string())
+            server = smtplib.SMTP_SSL(smtp_server, port, timeout=15)
         else:
-            with smtplib.SMTP(smtp_server, port, timeout=15) as server:
-                server.starttls()
-                server.login(sender_email, password)
-                server.sendmail(sender_email, receiver_email, message.as_string())
+            server = smtplib.SMTP(smtp_server, port, timeout=15)
+            server.starttls()
+        
+        server.login(sender_email, password)
+        server.sendmail(sender_email, receiver_email, message.as_string())
+        server.quit()
         return True, "邮件发送成功"
     
     except smtplib.SMTPAuthenticationError as e:
-        return False, f"认证失败：{str(e)}"
+        return False, f"认证失败：{str(e)}，请检查邮箱用户名或密码"
     except smtplib.SMTPConnectError as e:
-        return False, f"连接服务器失败：{str(e)}"
+        return False, f"连接服务器失败：{str(e)}，请检查网络设置"
     except smtplib.SMTPException as e:
         return False, f"SMTP协议错误：{str(e)}"
     except socket.timeout:
@@ -93,14 +77,17 @@ def send_email(smtp_server: str, port: int, sender_email: str,
     except Exception as e:
         return False, f"未知错误：{str(e)}"
 
-# 配置参数（只需维护发件人信息）
+# 配置参数（建议使用环境变量存储敏感信息）
 config = {
     "sender_email": "1972403603@qq.com",
-    "password": "*********",  # 授权码/密码
-    "receiver_email": "boring_student@qq.com",
+    "receiver_email": "1972403603@qq.com",
     "subject": "隧道alist离线",
     "body": f"来自&ldquo;{get_computer_name()}&rdquo;的CUL在 {get_current_time()} 发出的警告"
 }
+
+password = "********"
+
+config["password"] = password
 
 # 自动识别配置
 try:
