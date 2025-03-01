@@ -96,7 +96,7 @@ def send_email(smtp_server: str, port: int, sender_email: str,
 # 配置参数（只需维护发件人信息）
 config = {
     "sender_email": "1972403603@qq.com",
-    "password": "ijslcoakpnmkedfa",  # 授权码/密码
+    "password": "*********",  # 授权码/密码
     "receiver_email": "boring_student@qq.com",
     "subject": "隧道alist离线",
     "body": f"来自&ldquo;{get_computer_name()}&rdquo;的CUL在 {get_current_time()} 发出的警告"
