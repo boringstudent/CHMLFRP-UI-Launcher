@@ -3823,7 +3823,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     self.load_domains()  # 刷新域名列表
                 else:
                     self.logger.error(f"添加域名失败：{response['msg']}")
-                    QMessageBox.warning(self, "错误", f"添加域名失败: {response["msg"]}")
+                    QMessageBox.warning(self, "错误", f"添加域名失败：{response['msg']}")
             except Exception as content:
                 self.logger.exception("添加域名时发生错误")
                 QMessageBox.warning(self, "错误", f"添加域名失败: {str(content)}")
