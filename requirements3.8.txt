@@ -1,8 +1,0 @@
-ipaddress==1.0.23
-requests==2.32.3
-psutil==6.1.1
-pyperclip==1.9.0
-PyQt6==6.7.1
-mcstatus==11.1.1
-Win32Security==2.1.0
-pywin32==308
