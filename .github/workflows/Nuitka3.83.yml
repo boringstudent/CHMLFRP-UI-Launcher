@@ -52,7 +52,6 @@ jobs:
           --remove-output `
           --include-package=mcstatus `
           --include-package=requests `
-          --windows-console-mode=disable `
           --include-package=psutil `
           --include-package=pyperclip `
           --include-package=ipaddress `
