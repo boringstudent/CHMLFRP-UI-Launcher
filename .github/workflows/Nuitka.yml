@@ -23,16 +23,51 @@ jobs:
           cache: 'pip'
 
       - name: Install system dependencies
+        shell: pwsh
         run: |
-          # 使用 Chocolatey 安装必要工具
-          choco install upx 7zip -y --no-progress
-          refreshenv  # 刷新环境变量使安装生效
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          choco feature enable -n allowGlobalConfirmation
+    
+          # 安装核心工具
+          choco install upx 7zip.install -y --no-progress --force
+    
+          # 硬编码添加路径确保可靠性
+          $7zipPath = "C:\Program Files\7-Zip"
+          if (-not (Test-Path $7zipPath)) {
+              Write-Error "7-Zip installation path not found"
+              exit 1
+          }
+    
+          # 更新环境变量
+          $env:PATH = "$7zipPath;$env:PATH"
+          echo "PATH=$env:PATH" >> $env:GITHUB_ENV
+          echo "7ZIP_PATH=$7zipPath" >> $env:GITHUB_ENV
 
       - name: Verify tool installation
+        shell: pwsh
         run: |
-          where.exe upx
-          upx --version
-          7z | Select-String -Pattern "7-Zip"  # 验证7-Zip安装
+          # 路径验证
+          Write-Output "=== Environment PATH ==="
+          $env:PATH -split ';' | Where-Object { $_ -ne '' }
+    
+          Write-Output "`n=== Tool Verification ==="
+          try {
+              $upxPath = Get-Command upx -ErrorAction Stop
+              Write-Output "[SUCCESS] UPX path: $($upxPath.Source)"
+              upx --version
+          } catch {
+              Write-Error "UPX verification failed"
+              exit 1
+          }
+    
+          try {
+              $7zPath = Get-Command 7z -ErrorAction Stop
+              Write-Output "[SUCCESS] 7-Zip path: $($7zPath.Source)"
+              7z | Select-String -Pattern "7-Zip"
+          } catch {
+              Write-Error "7-Zip verification failed"
+              exit 1
+          }
 
       - name: Install Python dependencies
         run: |
