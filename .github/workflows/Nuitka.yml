@@ -80,7 +80,7 @@ jobs:
           python -m nuitka `
           --standalone `
           --assume-yes-for-downloads `
-          --enable-plugin=upx `       # 显式启用UPX插件
+          --enable-plugin=upx `
           --enable-plugin=pyqt6 `
           --windows-disable-console `
           --windows-icon-from-ico=./favicon.ico `
