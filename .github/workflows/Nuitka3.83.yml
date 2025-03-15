@@ -26,7 +26,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install nuitka
           pip install upx
-          pip install -r requirements.txt
+          pip install -r requirements3.8.txt
 
 
       - name: Install UPX
