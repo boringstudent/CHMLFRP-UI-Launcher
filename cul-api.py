@@ -3,6 +3,7 @@ import urllib3
 import socket
 import re  # 用于版本号解析和比较
 import os  # 用于文件操作
+import platform  # 用于获取系统信息
 
 urllib3.disable_warnings()
 
@@ -76,6 +77,15 @@ def get_release_info(current_version):
         if compare_versions(current_version, tag_name):
             print(f"当前版本 {current_version} 需要升级到 {tag_name}")
 
+            # 获取系统类型和版本
+            system_type = platform.system()
+            system_version = platform.version()
+            print(f"当前系统类型: {system_type}")
+            print(f"当前系统版本: {system_version}")
+
+            # 判断是否是 Windows 7
+            is_windows_7 = system_type == "Windows" and system_version.startswith("6.1")
+
             # 镜像前缀列表
             mirror_prefixes = [
                 "gh.llkk.cc",
@@ -88,7 +98,16 @@ def get_release_info(current_version):
             # 遍历 assets 获取 browser_download_url 并生成不同前缀的镜像链接
             for asset in release_data.get("assets", []):
                 original_url = asset.get("browser_download_url")
+                print(original_url)
                 if original_url:
+                    # 根据系统类型选择合适的文件
+                    if is_windows_7 and "win7" in asset["name"]:
+                        print(f"选择适用于 Windows 7 的文件: {asset['name']}")
+                    elif not is_windows_7 and "win7" not in asset["name"]:
+                        print(f"选择适用于其他系统的文件: {asset['name']}")
+                    else:
+                        continue
+
                     # 生成所有镜像链接
                     mirror_urls = []
                     for prefix in mirror_prefixes:
