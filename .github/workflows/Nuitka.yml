@@ -22,25 +22,24 @@ jobs:
           python-version: '3.13'
           cache: 'pip'
 
-      # 添加 Chocolatey 安装确认
-      - name: Install UPX via Chocolatey
+      - name: Install system dependencies
         run: |
-          choco install upx -y --no-progress
-          refreshenv  # 刷新环境变量
+          # 使用 Chocolatey 安装必要工具
+          choco install upx 7zip -y --no-progress
+          refreshenv  # 刷新环境变量使安装生效
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install "nuitka
-          pip install -r requirements.txt
-
-      # 添加 UPX 路径验证
-      - name: Verify UPX installation
+      - name: Verify tool installation
         run: |
           where.exe upx
           upx --version
+          7z | Select-String -Pattern "7-Zip"  # 验证7-Zip安装
 
-      # 关键参数优化
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install nuitka  # 修复未闭合的引号问题
+          pip install -r requirements.txt
+
       - name: Build executable with Nuitka
         run: |
           python -m nuitka `
@@ -56,17 +55,10 @@ jobs:
           --include-package=mcstatus,requests,psutil,pyperclip,ipaddress `
           --output-dir=./artifact `
           --remove-output `
-          --upx=--best `        # 启用 UPX 最高压缩
-          --jobs=10 `            # 调整并行任务数
+          --upx=--best `
+          --jobs=10 `
           ./CHMLFRP_UI.py
 
-      # 使用官方推荐的 7-Zip Action
-      - name: Install 7-Zip
-        uses: crazy-max/ghaction-7z@v2
-        with:
-          path: 7z.exe
-
-      # 添加构建结果验证
       - name: Verify build output
         run: |
           if (-not (Test-Path "./artifact/CHMLFRP_UI.dist/CHMLFRP_UI.exe")) {
@@ -74,13 +66,12 @@ jobs:
               exit 1
           }
 
-      # 改进版本号生成
       - name: Create versioned archive
         run: |
           $commitHash = git rev-parse --short HEAD
           $version = (Get-Content version.txt -ErrorAction SilentlyContinue) ?? "0.0.0"
           $versionTag = "${version}_$(Get-Date -Format 'yyyyMMdd')_${commitHash}"
-          7z a -mx9 -mmt4 "CHMLFRP_UI_$versionTag.7z" ./artifact/*
+          7z a -mx9 -mmt4 "CHMLFRP_UI_$versionTag.7z" ./artifact/CHMLFRP_UI.dist/*
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
