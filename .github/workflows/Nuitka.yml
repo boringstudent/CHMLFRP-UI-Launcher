@@ -76,6 +76,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Build executable with Nuitka
+        shell: pwsh
         run: |
           python -m nuitka `
           --standalone `
@@ -91,8 +92,8 @@ jobs:
           --include-package=mcstatus,requests,psutil,pyperclip,ipaddress `
           --output-dir=./artifact `
           --remove-output `
-          --upx-executable=C:\ProgramData\chocolatey\lib\upx\tools\upx.exe `  # 硬编码路径
-          --upx-compress=--best `     # 使用独立压缩参数
+          --upx-executable="$env:ChocolateyInstall\lib\upx\tools\upx.exe" `
+          --upx-compress="--best" `
           --jobs=10 `
           ./CHMLFRP_UI.py
 
