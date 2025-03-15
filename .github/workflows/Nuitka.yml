@@ -2,11 +2,9 @@ name: Build Nuitka Standalone Executable
 
 on:
   push:
-    branches:
-      - master
+    branches: [ master ]
   pull_request:
-    branches:
-      - master
+    branches: [ master ]
 
 jobs:
   build:
@@ -15,75 +13,78 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+          cache: 'pip'
+
+      # 添加 Chocolatey 安装确认
+      - name: Install UPX via Chocolatey
+        run: |
+          choco install upx -y --no-progress
+          refreshenv  # 刷新环境变量
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install nuitka
-          pip install upx
+          pip install "nuitka
           pip install -r requirements.txt
 
-
-      - name: Install UPX
+      # 添加 UPX 路径验证
+      - name: Verify UPX installation
         run: |
-          choco install upx -y
+          where.exe upx
+          upx --version
 
-      - name: Get UPX binary path
-        run: |
-          $UPXPath = (Get-Command upx).Source
-          echo "UPX_PATH=$UPXPath" >> $GITHUB_ENV
-
+      # 关键参数优化
       - name: Build executable with Nuitka
         run: |
-          python -m nuitka --standalone --python-flag=-O `
-          --include-data-files=./favicon.ico=./favicon.ico `
-          --include-data-files=./frpc.exe=./frpc.exe `
-          --include-package=PyQt6 `
-          --upx-binary=$UPX_PATH `
-          --include-package-data=PyQt6 `
-          --include-qt-plugins=styles,platforms,qml `
-          --plugin-enable=pyqt6,upx `
-          --follow-import-to=PyQt6,PyQt6.QtCore,PyQt6.QtGui,PyQt6.QtWidgets `
-          --remove-output `
-          --include-package=mcstatus `
-          --include-package=requests `
-          --windows-console-mode=disable `
-          --include-package=psutil `
-          --include-package=pyperclip `
-          --include-package=ipaddress `
+          python -m nuitka `
+          --standalone `
           --assume-yes-for-downloads `
-          --output-dir=./build_output `
-          --nofollow-import-to=psutil.tests.test_testutils `
-          --nofollow-import-to=psutil.tests `
+          --enable-plugin=pyqt6 `
+          --windows-disable-console `
           --windows-icon-from-ico=./favicon.ico `
-          --jobs=4 `
+          --include-data-file=./favicon.ico=./ `
+          --include-data-file=./frpc.exe=./ `
+          --include-qt-plugins=styles,platforms `
+          --include-package-data=PyQt6 `
+          --include-package=mcstatus,requests,psutil,pyperclip,ipaddress `
+          --output-dir=./artifact `
+          --remove-output `
+          --upx=--best `        # 启用 UPX 最高压缩
+          --jobs=10 `            # 调整并行任务数
           ./CHMLFRP_UI.py
 
-      - name: Check if output directory exists
+      # 使用官方推荐的 7-Zip Action
+      - name: Install 7-Zip
+        uses: crazy-max/ghaction-7z@v2
+        with:
+          path: 7z.exe
+
+      # 添加构建结果验证
+      - name: Verify build output
         run: |
-          $outputDir = "./build_output"
-          if (Test-Path $outputDir) {
-            Write-Host "Output directory exists, proceeding with compression."
-          } else {
-            Write-Error "Output directory not found at $outputDir"
-            exit 1
+          if (-not (Test-Path "./artifact/CHMLFRP_UI.dist/CHMLFRP_UI.exe")) {
+              Write-Error "Build failed: Executable not found"
+              exit 1
           }
 
-      - name: Compress build output
+      # 改进版本号生成
+      - name: Create versioned archive
         run: |
-          $currentDate = (Get-Date -Format "yyyy_MM_dd")
-          $zipFileName = "CHMLFRP_UI_$currentDate.zip"
-          Compress-Archive -Path "./build_output/*" -DestinationPath $zipFileName
-          Write-Output "Compressed build output to $zipFileName"
+          $commitHash = git rev-parse --short HEAD
+          $version = (Get-Content version.txt -ErrorAction SilentlyContinue) ?? "0.0.0"
+          $versionTag = "${version}_$(Get-Date -Format 'yyyyMMdd')_${commitHash}"
+          7z a -mx9 -mmt4 "CHMLFRP_UI_$versionTag.7z" ./artifact/*
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CHMLFRP_UI-archive
-          path: ./*.zip
+          name: CHMLFRP_UI-Build
+          path: ./*.7z
           retention-days: 7
