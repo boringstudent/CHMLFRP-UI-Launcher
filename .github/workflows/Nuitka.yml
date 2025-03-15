@@ -80,6 +80,7 @@ jobs:
           python -m nuitka `
           --standalone `
           --assume-yes-for-downloads `
+          --enable-plugin=upx `       # 显式启用UPX插件
           --enable-plugin=pyqt6 `
           --windows-disable-console `
           --windows-icon-from-ico=./favicon.ico `
@@ -90,7 +91,8 @@ jobs:
           --include-package=mcstatus,requests,psutil,pyperclip,ipaddress `
           --output-dir=./artifact `
           --remove-output `
-          --upx=--best `
+          --upx-executable=C:\ProgramData\chocolatey\lib\upx\tools\upx.exe `  # 硬编码路径
+          --upx-compress=--best `     # 使用独立压缩参数
           --jobs=10 `
           ./CHMLFRP_UI.py
 
