@@ -1,8 +1,9 @@
-ipaddress==1.0.23
 requests==2.32.3
+urllib3==2.3.0
+ipaddress==1.0.23
 psutil==6.1.1
 pyperclip==1.9.0
-PyQt6==6.8.0
-mcstatus==11.1.1
-Win32Security==2.1.0
 pywin32==308
+Win32Security==2.1.0
+PyQt6==6.8.0
+
