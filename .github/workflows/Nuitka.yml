@@ -50,7 +50,6 @@ jobs:
           --plugin-enable=pyqt6,upx `
           --follow-import-to=PyQt6,PyQt6.QtCore,PyQt6.QtGui,PyQt6.QtWidgets `
           --remove-output `
-          --include-package=mcstatus `
           --include-package=requests `
           --windows-console-mode=disable `
           --include-package=psutil `
