@@ -1,149 +1,229 @@
 import requests
 import urllib3
 import socket
-import re  # 用于版本号解析和比较
-import os  # 用于文件操作
+import re
+from tqdm import tqdm
+from dns.resolver import Resolver, NoNameservers, NXDOMAIN, NoAnswer, Timeout
 
 urllib3.disable_warnings()
 
-dns_table = {
-    "api.github.com": [
-        "1.1.1.1",                # Cloudflare DNS
-        "8.8.8.8",                # Google DNS
-        "114.114.114.114",        # 阿里云 DNS
-        "223.5.5.5",              # 阿里云
-        "9.9.9.9"                # Quad9 DNS
-    ]
+# 全局配置
+DNS_CONFIG = {
+    "servers": [
+        "1.1.1.1",  # Cloudflare
+        "8.8.8.8",  # Google
+        "114.114.114.114",  # 114DNS
+        "223.5.5.5",  # AliDNS
+        "9.9.9.9"  # Quad9
+    ],
+    "timeout": 5,
+    "domain": "api.github.com"
 }
 
-def test_connectivity(ip, timeout=5):
-    """
-    测试 IP 地址的连通性
-    """
+MIRROR_PREFIXES = [
+
+    "github.tbedu.top", #3mb
+    "gitproxy.click", #2-3mb
+    "github.moeyy.xyz", #5mb
+    "ghproxy.net", #4mb
+    "gh.llkk.cc", #3mb
+
+]
+
+DOWNLOAD_TIMEOUT = 10
+
+
+def setup_dns_resolver():
+    """配置自定义DNS解析器"""
+    resolver = Resolver()
+    resolver.nameservers = DNS_CONFIG["servers"]
+    resolver.lifetime = DNS_CONFIG["timeout"]
+    return resolver
+
+
+def resolve_dns(resolver, domain):
+    """使用自定义DNS解析域名"""
+    try:
+        answer = resolver.resolve(domain, 'A')
+        return [str(r) for r in answer]
+    except (NoNameservers, NXDOMAIN, NoAnswer, Timeout) as e:
+        print(f"DNS解析失败: {type(e).__name__} - {str(e)}")
+        return []
+
+
+def test_connectivity(ip, port=443, timeout=5):
+    """测试IP:Port连通性"""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
-        result = sock.connect_ex((ip, 443))
-        sock.close()
+        result = sock.connect_ex((ip, port))
         return result == 0
     except Exception as e:
-        print(f"测试 {ip} 时出错: {e}")
+        print(f"连接测试失败 [{ip}]: {str(e)}")
         return False
+    finally:
+        try:
+            sock.close()
+        except:
+            pass
 
-def get_release_info(current_version):
-    """
-    获取最新版本信息并处理下载逻辑
-    """
+
+def find_working_ip(domain):
+    """寻找可用的IP地址"""
+    resolver = setup_dns_resolver()
+    ips = resolve_dns(resolver, domain)
+
+    if not ips:
+        print("所有DNS服务器均无法解析域名")
+        return domain  # 回退到域名
+
+    for ip in ips:
+        if test_connectivity(ip):
+            print(f"可用IP: {ip}")
+            return ip
+
+    print("所有IP均不可用，回退到域名")
+    return domain
+
+
+def build_request_url(endpoint):
+    """构建请求URL"""
+    if re.match(r"\d+\.\d+\.\d+\.\d+", endpoint):
+        return (
+            f"https://{endpoint}/repos/boringstudents/CHMLFRP-UI-Launcher/releases/latest",
+            {"Host": DNS_CONFIG["domain"]}
+        )
+    return (
+        f"https://{endpoint}/repos/boringstudents/CHMLFRP-UI-Launcher/releases/latest",
+        {}
+    )
+
+
+def fetch_release_data(url, headers):
+    """获取版本发布信息"""
     try:
-        # 目标域名
-        target_domain = "api.github.com"
-        for dns_server in dns_table[target_domain]:
-            print(f"尝试使用 DNS 服务器 {dns_server} 解析 {target_domain}")
-            # 获取目标域名的 IP 地址
-            target_ip = socket.gethostbyname(target_domain)
-            print(f"解析到的 IP 地址: {target_ip}")
+        response = requests.get(
+            url,
+            headers=headers,
+            proxies=None,
+            verify=False,
+            timeout=DNS_CONFIG["timeout"]
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        print(f"请求失败: {str(e)}")
+        raise
 
-            # 如果解析到回环地址，直接使用域名
-            if target_ip in ["127.0.0.1", "0.0.0.0"]:
-                url = f"https://{target_domain}/repos/boringstudents/CHMLFRP-UI-Launcher/releases/latest"
-                break
-            else:
-                # 测试连通性
-                if test_connectivity(target_ip):
-                    print(f"IP 地址 {target_ip} 连接成功！")
-                    url = f"https://{target_ip}/repos/boringstudents/CHMLFRP-UI-Launcher/releases/latest"
-                    break
-                else:
-                    print(f"IP 地址 {target_ip} 连通性测试失败，尝试下一个 DNS 服务器。")
-        else:
-            raise Exception("所有 DNS 服务器解析的 IP 地址均无法连接！")
 
-        # 设置请求头部，显式指定 Host
-        headers = {
-            "Host": target_domain
-        }
+def parse_version(version_str):
+    """解析版本号字符串"""
+    match = re.match(r"v?(\d+)(?:\.(\d+))?(?:\.(\d+))?", version_str)
+    if not match:
+        return ()
+    return tuple(int(x) if x else 0 for x in match.groups())
 
-        # 发送请求，跳过本地代理
-        proxies = None
-        response = requests.get(url, headers=headers, proxies=proxies, verify=False)
+
+def is_newer_version(current, latest):
+    """比较版本号"""
+    current_ver = parse_version(current)
+    latest_ver = parse_version(latest)
+    return latest_ver > current_ver
+
+
+def generate_mirror_urls(original_url):
+    """生成镜像站URL列表"""
+    return [f"https://{prefix}/{original_url}" for prefix in MIRROR_PREFIXES]
+
+
+def download_with_tqdm(url, filename):
+    """使用tqdm进度条下载文件"""
+    try:
+        response = requests.get(
+            url,
+            stream=True,
+            timeout=DOWNLOAD_TIMEOUT,
+            allow_redirects=True
+        )
         response.raise_for_status()
 
-        # 解析返回的 JSON 数据
-        release_data = response.json()
-        tag_name = release_data.get("tag_name")
+        total_size = int(response.headers.get('content-length', 0))
 
-        # 版本比较
-        if compare_versions(current_version, tag_name):
-            print(f"当前版本 {current_version} 需要升级到 {tag_name}")
+        with open(filename, 'wb') as f:
+            with tqdm(
+                    total=total_size,
+                    unit='B',
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    desc=f"下载 {filename}",
+                    ncols=80,
+                    miniters=1
+            ) as pbar:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        pbar.update(len(chunk))
 
-            # 镜像前缀列表
-            mirror_prefixes = [
-                "gh.llkk.cc",
-                "ghproxy.net",
-                "gitproxy.click",
-                "github.tbedu.top",
-                "github.moeyy.xyz"
-            ]
-
-            # 遍历 assets 获取 browser_download_url 并生成不同前缀的镜像链接
-            for asset in release_data.get("assets", []):
-                original_url = asset.get("browser_download_url")
-                if original_url:
-
-                    # 生成所有镜像链接
-                    mirror_urls = []
-                    for prefix in mirror_prefixes:
-                        mirror_url = f"https://{prefix}/{original_url}"
-                        mirror_urls.append(mirror_url)
-
-                    # 尝试下载各个镜像链接
-                    download_success = False
-                    new_filename = f"CUL{tag_name}.zip"  # 重命名的文件名
-                    for url in mirror_urls:
-                        try:
-                            response = requests.get(url, stream=False, timeout=10)
-                            response.raise_for_status()
-                            with open(new_filename, "wb") as f:
-                                f.write(response.content)
-                            print(f"文件下载成功，已保存为 {new_filename}")
-                            download_success = True
-                            break
-                        except Exception as e:
-                            print(f"下载失败，尝试下一个镜像链接: {e}")
-                    if download_success:
-                        break
-                    else:
-                        print("所有镜像链接下载失败！")
-                else:
-                    print("未找到有效的下载链接")
-        else:
-            print(f"当前版本 {current_version} 已是最新版本，无需升级")
-
-    except requests.exceptions.RequestException as e:
-        print("请求失败：", e)
-
-def compare_versions(current_version, latest_version):
-    pattern = r"v?(\d+\.\d+\.\d+)"
-
-    def parse_version(ver):
-        match = re.match(pattern, ver)
-        if match:
-            return list(map(int, match.group(1).split(".")))
-        else:
-            return []
-
-    current = parse_version(current_version)
-    latest = parse_version(latest_version)
-
-    if not current or not latest:
-        print("版本号格式不正确")
+        return True
+    except Exception as e:
+        print(f"\n下载失败: {str(e)}")
         return False
-    for c, l in zip(current, latest):
-        if c < l:
-            return True
-        elif c > l:
-            return False
-    return len(current) < len(latest)
 
-# 调用函数，假设当前版本是 1.5.5
-get_release_info(current_version="1.5.5")
+
+def download_with_retry(urls, filename, max_retries=3):
+    """带重试的下载功能"""
+    for attempt in range(max_retries):
+        for url in urls:
+            try:
+                print(f"尝试下载 [{attempt + 1}/{max_retries}]: {url}")
+                if download_with_tqdm(url, filename):
+                    print(f"下载成功: {filename}")
+                    return True
+            except Exception as e:
+                print(f"下载失败: {str(e)}")
+    return False
+
+
+def process_update(current_version):
+    """处理更新流程"""
+    try:
+        # 1. 解析可用端点
+        endpoint = find_working_ip(DNS_CONFIG["domain"])
+
+        # 2. 构建请求
+        url, headers = build_request_url(endpoint)
+
+        # 3. 获取发布信息
+        release_data = fetch_release_data(url, headers)
+        latest_version = release_data["tag_name"]
+
+        # 4. 版本比较
+        if not is_newer_version(current_version, latest_version):
+            print(f"当前版本 {current_version} 已是最新")
+            return False
+
+        print(f"发现新版本: {latest_version}")
+
+        # 5. 处理资源下载
+        for asset in release_data.get("assets", []):
+            if not asset.get("browser_download_url"):
+                continue
+
+            mirror_urls = generate_mirror_urls(asset["browser_download_url"])
+            filename = f"CUL{latest_version}.zip"
+
+            if download_with_retry(mirror_urls, filename):
+                print("更新下载完成")
+                return True
+
+        print("所有下载尝试均失败")
+        return False
+
+    except Exception as e:
+        print(f"更新流程异常: {str(e)}")
+        return False
+
+
+# 使用示例
+if __name__ == "__main__":
+    process_update("1.5.5")
