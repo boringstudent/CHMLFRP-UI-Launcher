@@ -1,11 +1,9 @@
-import ast
 import ipaddress
 import json
 import logging
 import os
 import random
 import re
-import shutil
 import socket
 import subprocess
 import sys
@@ -26,7 +24,6 @@ import win32security
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
 from PyQt6.QtWidgets import *
-from mcstatus import *
 from requests import *
 
 """提权"""
@@ -227,13 +224,6 @@ def login(username, password):
         logger.exception(content)
         return None
 
-
-def resolve_to_ipv4(hostname):
-    try:
-        return socket.gethostbyname(hostname)
-    except socket.gaierror:
-        return None
-
 def get_user_tunnels(user_token):
     """获取用户隧道列表"""
     url = f"http://cf-v2.uapis.cn/tunnel"
@@ -287,588 +277,6 @@ class QtHandler(QObject, logging.Handler):
     def emit(self, record):
         msg = self.format(record)
         self.new_record.emit(msg)
-
-class PortScannerThread(QThread):
-    update_signal = pyqtSignal(str)
-    progress_signal = pyqtSignal(int)
-
-    def __init__(self, ip, start_port, end_port, thread_multiplier, timeout):
-        super().__init__()
-        self.total_ports = None
-        self.scanned_ports = None
-        self.ip = ip
-        self.start_port = start_port
-        self.end_port = end_port
-        self.thread_multiplier = thread_multiplier
-        self.timeout = timeout
-        self.open_ports = []
-        self.lock = threading.Lock()
-        self.output_lock = threading.Lock()
-        self.stop_flag = threading.Event()
-
-    def stop(self):
-        self.stop_flag.set()
-
-    def run(self):
-        self.total_ports = self.end_port - self.start_port + 1
-        self.scanned_ports = 0
-
-        ports_per_thread = max(1, int(10 / self.thread_multiplier))
-        num_threads = min(self.total_ports, max(1, int(self.total_ports / ports_per_thread)))
-
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            port_ranges = [range(i, min(i + ports_per_thread, self.end_port + 1))
-                           for i in range(self.start_port, self.end_port + 1, ports_per_thread)]
-
-            futures = [executor.submit(self.scan_ports, port_range) for port_range in port_ranges]
-            for future in as_completed(futures):
-                if self.stop_flag.is_set():
-                    break
-            executor.shutdown(wait=False)
-
-        self.progress_signal.emit(100)
-        if self.stop_flag.is_set():
-            self.update_signal.emit("扫描已停止")
-        else:
-            self.update_signal.emit(f"扫描完成。找到 {len(self.open_ports)} 个开放端口。")
-
-    def scan_ports(self, ports):
-        local_open_ports = []
-        for port in ports:
-            if self.stop_flag.is_set():
-                break
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(self.timeout)
-                    result = s.connect_ex((self.ip, port))
-                    if result == 0:
-                        local_open_ports.append(port)
-            except:
-                pass
-            finally:
-                with self.lock:
-                    self.scanned_ports += 1
-                    progress = min(99, int((self.scanned_ports / self.total_ports) * 100))
-                    self.progress_signal.emit(progress)
-
-        with self.output_lock:
-            for port in local_open_ports:
-                self.open_ports.append(port)
-                self.update_signal.emit(f"端口 {port} 开放")
-
-
-class IPToolsWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.scanner_thread = None
-        self.scan_result = None
-        self.scan_progress = None
-        self.stop_button = None
-        self.scan_button = None
-        self.timeout_input = None
-        self.thread_multiplier_combo = None
-        self.end_port_input = None
-        self.start_port_input = None
-        self.scanner_ip_input = None
-        self.url_result = None
-        self.url_input = None
-        self.port_result = None
-        self.protocol_combo = None
-        self.port_input = None
-        self.host_input = None
-        self.ip_result = None
-        self.ip_input = None
-        self.tab_widget = None
-        self.initUI()
-
-    def initUI(self):
-        layout = QVBoxLayout()
-
-        self.tab_widget = QTabWidget()
-        self.tab_widget.addTab(self.create_ip_info_tab(), "IP信息")
-        self.tab_widget.addTab(self.create_port_status_tab(), "端口状态")
-        self.tab_widget.addTab(self.create_url_status_tab(), "URL状态码")
-        self.tab_widget.addTab(self.create_port_scanner_tab(), "本地端口扫描")
-
-        layout.addWidget(self.tab_widget)
-        self.setLayout(layout)
-
-    def create_ip_info_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        input_layout = QHBoxLayout()
-        self.ip_input = QLineEdit()
-        self.ip_input.setPlaceholderText("输入IP地址")
-        input_layout.addWidget(self.ip_input)
-
-        check_button = QPushButton("查询")
-        check_button.clicked.connect(self.check_ip_info)
-        input_layout.addWidget(check_button)
-
-        layout.addLayout(input_layout)
-
-        self.ip_result = QTextEdit()
-        self.ip_result.setReadOnly(True)
-        layout.addWidget(self.ip_result)
-
-        return widget
-
-    def create_port_status_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        input_layout = QHBoxLayout()
-        self.host_input = QLineEdit()
-        self.host_input.setPlaceholderText("输入IP地址或域名")
-        input_layout.addWidget(self.host_input)
-
-        self.port_input = QLineEdit()
-        self.port_input.setPlaceholderText("输入端口")
-        input_layout.addWidget(self.port_input)
-
-        self.protocol_combo = QComboBox()
-        self.protocol_combo.addItems(["TCP", "UDP"])
-        input_layout.addWidget(self.protocol_combo)
-
-        check_button = QPushButton("查询")
-        check_button.clicked.connect(self.check_port_status)
-        input_layout.addWidget(check_button)
-
-        layout.addLayout(input_layout)
-
-        self.port_result = QTextEdit()
-        self.port_result.setReadOnly(True)
-        layout.addWidget(self.port_result)
-
-        return widget
-
-    def create_url_status_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        input_layout = QHBoxLayout()
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("输入URL")
-        input_layout.addWidget(self.url_input)
-
-        check_button = QPushButton("查询")
-        check_button.clicked.connect(self.check_url_status)
-        input_layout.addWidget(check_button)
-
-        layout.addLayout(input_layout)
-
-        self.url_result = QTextEdit()
-        self.url_result.setReadOnly(True)
-        layout.addWidget(self.url_result)
-
-        return widget
-
-    def create_port_scanner_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        input_layout = QHBoxLayout()
-        self.scanner_ip_input = QLineEdit()
-        self.scanner_ip_input.setPlaceholderText("输入IP地址或主机名")
-        input_layout.addWidget(self.scanner_ip_input)
-
-        self.start_port_input = QLineEdit()
-        self.start_port_input.setPlaceholderText("起始端口")
-        input_layout.addWidget(self.start_port_input)
-
-        self.end_port_input = QLineEdit()
-        self.end_port_input.setPlaceholderText("结束端口")
-        input_layout.addWidget(self.end_port_input)
-
-        self.thread_multiplier_combo = QComboBox()
-        self.thread_multiplier_combo.addItems([f"{i}x" for i in range(1, 11)])
-        input_layout.addWidget(self.thread_multiplier_combo)
-
-        self.timeout_input = QLineEdit()
-        self.timeout_input.setPlaceholderText("延时(秒)")
-        input_layout.addWidget(self.timeout_input)
-
-        self.scan_button = QPushButton("扫描")
-        self.scan_button.clicked.connect(self.start_port_scan)
-        input_layout.addWidget(self.scan_button)
-
-        self.stop_button = QPushButton("停止")
-        self.stop_button.clicked.connect(self.stop_port_scan)
-        self.stop_button.setEnabled(False)
-        input_layout.addWidget(self.stop_button)
-
-        layout.addLayout(input_layout)
-
-        self.scan_progress = QProgressBar()
-        layout.addWidget(self.scan_progress)
-
-        self.scan_result = QTextEdit()
-        self.scan_result.setReadOnly(True)
-        layout.addWidget(self.scan_result)
-
-        return widget
-
-    def check_ip_info(self):
-        ip = self.ip_input.text().strip()
-        if not is_valid_ipv4(ip):
-            resolved_ip = resolve_to_ipv4(ip)
-            if not resolved_ip:
-                self.ip_result.setPlainText("无效的IP地址或无法解析的主机名")
-                return
-            ip = resolved_ip
-
-        url = f"https://uapis.cn/api/ipinfo?ip={ip}"
-        self.make_request(url, self.ip_result)
-
-    def check_port_status(self):
-        host = self.host_input.text().strip()
-        port = self.port_input.text().strip()
-        protocol = self.protocol_combo.currentText().lower()
-
-        host = re.sub(r'^https?://', '', host)
-
-        if ':' in host:
-            host, port = host.split(':', 1)
-
-        if not port.isdigit():
-            self.port_result.setPlainText("请输入有效的端口号")
-            return
-
-        url = f"https://uapis.cn/api/portstats?host={host}&port={port}&protocol={protocol}"
-        self.make_request(url, self.port_result)
-
-    def check_url_status(self):
-        url = self.url_input.text().strip()
-        url = re.sub(r'^https?://', '', url)
-        url = re.sub(r':\d+', '', url)
-        api_url = f"https://uapis.cn/api/urlstatuscode?url=http://{url}"
-        self.make_request(api_url, self.url_result)
-
-    def start_port_scan(self):
-        ip = self.scanner_ip_input.text().strip()
-        start_port = int(self.start_port_input.text() or 1)
-        end_port = int(self.end_port_input.text() or 65535)
-        thread_multiplier = int(self.thread_multiplier_combo.currentText()[:-1])
-        timeout = float(self.timeout_input.text() or 0.1)
-
-        if not is_valid_ipv4(ip):
-            resolved_ip = resolve_to_ipv4(ip)
-            if not resolved_ip:
-                self.scan_result.setPlainText("无效的IP地址或无法解析的主机名")
-                return
-            ip = resolved_ip
-
-        self.scan_result.clear()
-        self.scan_progress.setValue(0)
-
-        self.scanner_thread = PortScannerThread(ip, start_port, end_port, thread_multiplier, timeout)
-        self.scanner_thread.update_signal.connect(self.update_scan_result)
-        self.scanner_thread.progress_signal.connect(self.scan_progress.setValue)
-        self.scanner_thread.finished.connect(self.on_scan_finished)
-        self.scanner_thread.start()
-
-        self.scan_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-
-    def stop_port_scan(self):
-        if hasattr(self, 'scanner_thread') and self.scanner_thread.isRunning():
-            self.scanner_thread.stop()
-            self.scan_result.append("正在停止扫描...")
-            self.stop_button.setEnabled(False)
-
-    def on_scan_finished(self):
-        self.scan_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-
-    def update_scan_result(self, message):
-        self.scan_result.append(message)
-
-    @staticmethod
-    def make_request(url, result_widget):
-        try:
-            response = requests.get(url)
-            data = response.json()
-            if data['code'] == 200:
-                result = "\n".join([f"{k}: {v}" for k, v in data.items() if k != 'code'])
-                result_widget.setPlainText(result)
-            else:
-                result_widget.setPlainText(f"查询失败: {data.get('msg', '未知错误')}")
-        except Exception as content:
-            result_widget.setPlainText(f"查询错误: {str(content)}")
-
-    def update_style(self, is_dark):
-        style = """
-		QWidget {
-			background-color: #2D2D2D;
-			color: #FFFFFF;
-		}
-		QLineEdit, QTextEdit, QComboBox {
-			background-color: #3D3D3D;
-			border: 1px solid #555555;
-			color: #FFFFFF;
-			padding: 5px;
-		}
-		QPushButton {
-			background-color: #0D47A1;
-			color: white;
-			border: none;
-			padding: 5px 10px;
-		}
-		QPushButton:hover {
-			background-color: #1565C0;
-		}
-		QPushButton:pressed {
-			background-color: #0D47A1;
-		}
-		QPushButton:disabled {
-			background-color: #CCCCCC;
-			color: #666666;
-		}
-		QTabWidget::pane {
-			border: 1px solid #555555;
-		}
-		QTabBar::tab {
-			background-color: #2D2D2D;
-			color: #FFFFFF;
-			padding: 5px;
-		}
-		QTabBar::tab:selected {
-			background-color: #3D3D3D;
-		}
-		""" if is_dark else """
-		QWidget {
-			background-color: #FFFFFF;
-			color: #000000;
-		}
-		QLineEdit, QTextEdit, QComboBox {
-			background-color: #F0F0F0;
-			border: 1px solid #CCCCCC;
-			color: #000000;
-			padding: 5px;
-		}
-		QPushButton {
-			background-color: #4CAF50;
-			color: white;
-			border: none;
-			padding: 5px 10px;
-		}
-		QPushButton:hover {
-			background-color: #45a049;
-		}
-		QPushButton:pressed {
-			background-color: #4CAF50;
-		}
-		QPushButton:disabled {
-			background-color: #CCCCCC;
-			color: #666666;
-		}
-		QTabWidget::pane {
-			border: 1px solid #CCCCCC;
-		}
-		QTabBar::tab {
-			background-color: #F0F0F0;
-			color: #000000;
-			padding: 5px;
-		}
-		QTabBar::tab:selected {
-			background-color: #FFFFFF;
-		}
-		"""
-        self.setStyleSheet(style)
-
-        for i in range(self.tab_widget.count()):
-            tab = self.tab_widget.widget(i)
-            tab.setStyleSheet(style)
-
-
-class PingThread(QThread):
-    update_signal = pyqtSignal(str, object)
-
-    def __init__(self, target, ping_type):
-        super().__init__()
-        self.target = target
-        self.ping_type = ping_type
-
-    def run(self):
-        if self.ping_type == "ICMP":
-            result = self.icmp_ping()
-        elif self.ping_type == "TCP":
-            result = self.tcp_ping()
-        elif self.ping_type == "HTTP":
-            result = self.http_ping()
-        elif self.ping_type == "HTTPS":
-            result = self.https_ping()
-        elif self.ping_type == "JavaMC":
-            result = self.java_mc_ping()
-        elif self.ping_type == "BedrockMC":
-            result = self.bedrock_mc_ping()
-        else:
-            result = None
-
-        if result is not None:
-            self.update_signal.emit(self.target, result)
-
-    def icmp_ping(self):
-        try:
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = subprocess.SW_HIDE
-                output = subprocess.check_output(
-                    ["ping", "-n", "4", self.target],
-                    universal_newlines=True,
-                    stderr=subprocess.STDOUT,
-                    startupinfo=startupinfo,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-            else:
-                output = subprocess.check_output(
-                    ["ping", "-c", "4", self.target],
-                    universal_newlines=True,
-                    stderr=subprocess.STDOUT
-                )
-
-            # 提取延迟时间，包括 <1ms 的情况
-            times = re.findall(r"时间[=<](\d+|<1)ms", output)
-
-            processed_times = []
-            for t in times:
-                if t == '<1':
-                    processed_times.append(0.5)  # 将 <1ms 视为 0.5ms
-                else:
-                    processed_times.append(float(t))
-
-            if processed_times:
-                return {
-                    'min': min(processed_times),
-                    'max': max(processed_times),
-                    'avg': sum(processed_times) / len(processed_times),
-                    'loss': self.calculate_packet_loss(output)
-                }
-            else:
-                return "Ping 成功，但无法提取延迟信息"
-        except subprocess.CalledProcessError as content:
-            error_output = content.output.strip()
-            if "无法访问目标主机" in error_output:
-                return "无法访问目标主机"
-            elif "请求超时" in error_output:
-                return "请求超时"
-            elif "一般故障" in error_output:
-                return "一般故障"
-            else:
-                return f"Ping 失败: {error_output}"
-        except Exception as content:
-            return f"Ping 错误: {str(content)}"
-
-    @staticmethod
-    def calculate_packet_loss(output):
-        match = re.search(r"(\d+)% 丢失", output)
-        if match:
-            return int(match.group(1))
-        return None
-
-    def tcp_ping(self):
-        port = 80  # 默认使用 80 端口
-        if ':' in self.target:
-            host, port = self.target.split(':')
-            port = int(port)
-        else:
-            host = self.target
-
-        results = []
-        total_time = 0
-        success = 0
-        attempts = 4  # 进行 4 次尝试，与 ICMP ping 保持一致
-
-        for _ in range(attempts):
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)  # 设置 1 秒超时
-                start_time = time.time()
-                result = sock.connect_ex((host, port))
-                end_time = time.time()
-
-                if result == 0:
-                    latency = (end_time - start_time) * 1000  # 转换为毫秒
-                    results.append(latency)
-                    total_time += latency
-                    success += 1
-                    self.update_signal.emit(self.target, f"连接成功: {latency:.2f}ms")
-                else:
-                    self.update_signal.emit(self.target, f"连接失败: {socket.error(result)}")
-            except socket.gaierror:
-                self.update_signal.emit(self.target, "名称解析失败")
-                return "名称解析失败"
-            except socket.timeout:
-                self.update_signal.emit(self.target, "连接超时")
-            except Exception as content:
-                self.update_signal.emit(self.target, f"错误: {str(content)}")
-            finally:
-                sock.close()
-
-            time.sleep(1)  # 在每次尝试之间等待 1 秒
-
-        if success > 0:
-            avg_latency = total_time / success
-            loss_rate = (attempts - success) / attempts * 100
-            return {
-                'min': min(results) if results else None,
-                'max': max(results) if results else None,
-                'avg': avg_latency,
-                'loss': loss_rate
-            }
-        else:
-            return "所有 TCP 连接尝试均失败"
-
-    def http_ping(self):
-        try:
-            start_time = time.time()
-            requests.get(f"http://{self.target}", timeout=5)
-            return (time.time() - start_time) * 1000
-        except requests.RequestException:
-            return None
-
-    def https_ping(self):
-        try:
-            start_time = time.time()
-            requests.get(f"https://{self.target}", timeout=5, verify=False)
-            return (time.time() - start_time) * 1000
-        except requests.RequestException:
-            return None
-
-    def java_mc_ping(self):
-        try:
-            server = JavaServer.lookup(self.target)
-            status = server.status()
-            return {
-                '延迟': status.latency,
-                '版本': status.version.name,
-                '协议': status.version.protocol,
-                '在线玩家': status.players.online,
-                '最大玩家': status.players.max,
-                '描述': status.description
-            }
-        except Exception as content:
-            return f"错误: {str(content)}"
-
-    def bedrock_mc_ping(self):
-        try:
-            server = BedrockServer.lookup(self.target)
-            status = server.status()
-            return {
-                '延迟': status.latency,
-                '版本': status.version.name,
-                '协议': status.version.protocol,
-                '在线玩家': status.players.online,
-                '最大玩家': status.players.max,
-                '游戏模式': status.gamemode,
-                '地图': status.map_name
-            }
-        except Exception as content:
-            return f"错误: {str(content)}"
-
-
 
 class TunnelCard(QFrame):
     clicked = pyqtSignal(object, bool)
@@ -1913,22 +1321,16 @@ class MainWindow(QMainWindow):
         self.tunnel_button = QPushButton("隧道管理")
         self.domain_button = QPushButton("域名管理")
         self.node_button = QPushButton("节点状态")
-        self.ping_button = QPushButton("Ping工具")
-        self.ip_tools_button = QPushButton("IP工具")
 
         self.user_info_button.clicked.connect(lambda: self.switch_tab("user_info"))
         self.tunnel_button.clicked.connect(lambda: self.switch_tab("tunnel"))
         self.domain_button.clicked.connect(lambda: self.switch_tab("domain"))
         self.node_button.clicked.connect(lambda: self.switch_tab("node"))
-        self.ping_button.clicked.connect(lambda: self.switch_tab("ping"))
-        self.ip_tools_button.clicked.connect(lambda: self.switch_tab("ip_tools"))
 
         menu_layout.addWidget(self.user_info_button)
         menu_layout.addWidget(self.tunnel_button)
         menu_layout.addWidget(self.domain_button)
         menu_layout.addWidget(self.node_button)
-        menu_layout.addWidget(self.ping_button)
-        menu_layout.addWidget(self.ip_tools_button)
         menu_layout.addStretch(1)
 
         content_layout.addWidget(menu_widget)
@@ -1956,8 +1358,6 @@ class MainWindow(QMainWindow):
         self.setup_tunnel_page()
         self.setup_domain_page()
         self.setup_node_page()
-        self.setup_ping_page()
-        self.setup_ip_tools_page()
 
         self.switch_tab("user_info")
 
@@ -1965,9 +1365,7 @@ class MainWindow(QMainWindow):
             self.user_info_button,
             self.tunnel_button,
             self.domain_button,
-            self.node_button,
-            self.ping_button,
-            self.ip_tools_button
+            self.node_button
         ]
 
     def load_app_settings(self):
@@ -2046,11 +1444,6 @@ class MainWindow(QMainWindow):
     def set_taskbar_icon(self):
         icon_path = get_absolute_path("favicon.ico")
         self.setWindowIcon(QIcon(icon_path))
-
-    def setup_ip_tools_page(self):
-        self.ip_tools_widget = IPToolsWidget()
-        self.content_stack.addWidget(self.ip_tools_widget)
-        self.ip_tools_widget.update_style(self.dark_theme)
 
     def check_node_status(self):
         if not self.token:
@@ -2754,38 +2147,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(close_button)
 
         dialog.exec()
-
-    def setup_ping_page(self):
-        ping_widget = QWidget()
-        layout = QVBoxLayout(ping_widget)
-
-        self.target_input = QLineEdit()
-        self.target_input.setPlaceholderText("输入目标地址（IP或域名）")
-        layout.addWidget(self.target_input)
-
-        ping_type_layout = QHBoxLayout()
-        self.ping_type_combo = QComboBox()
-        self.ping_type_combo.addItems(["ICMP", "TCP", "HTTP", "HTTPS", "JavaMC", "BedrockMC", "API"])
-        ping_type_layout.addWidget(QLabel("Ping类型:"))
-        ping_type_layout.addWidget(self.ping_type_combo)
-        layout.addLayout(ping_type_layout)
-
-        self.ping_button = QPushButton("开始Ping")
-        self.ping_button.clicked.connect(self.start_ping)
-        layout.addWidget(self.ping_button)
-
-        self.ping_result = QTextEdit()
-        self.ping_result.setReadOnly(True)
-        layout.addWidget(self.ping_result)
-
-        self.content_stack.addWidget(ping_widget)
-
-        if hasattr(self, 'api_protocol_combo'):
-            self.api_protocol_combo.deleteLater()
-            del self.api_protocol_combo
-
-    def on_ping_type_changed(self, ping_type):
-        self.api_protocol_combo.setVisible(ping_type == "API")
 
     def load_credentials(self):
         """加载保存的凭证"""
@@ -3612,6 +2973,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         type_combo = QComboBox()
         type_combo.addItems(["A", "AAAA", "CNAME", "SRV"])
         target_input = QLineEdit()
+        remarks = QLineEdit()
         ttl_combo = QComboBox()
         ttl_combo.addItems(TTL_OPTIONS)
         ttl_combo.setCurrentText("1分钟")
@@ -3632,6 +2994,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         layout.addRow("类型:", type_combo)
         layout.addRow("目标:", target_input)
         layout.addRow("TTL:", ttl_combo)
+        layout.addRow("备注:", remarks)
         layout.addRow(srv_widget)
 
         ttl_note = QLabel("注意：较慢的TTL可以提升解析稳定度，但会延长更新生效时间。")
@@ -3812,13 +3175,13 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     "type": record_type,
                     "ttl": ttl_combo.currentText(),
                     "target": target,
-                    "remarks": ""
+                    "remarks": remarks.text()
                 }
 
                 headers = get_headers(request_json=True)
                 response = requests.post(url, headers=headers, json=payload)
                 response = response.json()
-                if response.status_code == 200:
+                if response['code'] == 200:
                     self.logger.info(response["msg"])
                     self.load_domains()  # 刷新域名列表
                 else:
@@ -3864,6 +3227,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             domain_label = QLabel(domain_info['domain'])
             record_label = QLabel(domain_info['record'])
             type_label = QLabel(domain_info['type'])
+            remarks = QLineEdit(domain_info['remarks'])
 
             # 可编辑字段
             target_input = QLineEdit(domain_info['target'])
@@ -3877,6 +3241,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             layout.addRow("类型:", type_label)
             layout.addRow("目标:", target_input)
             layout.addRow("TTL:", ttl_combo)
+            layout.addRow("备注:", remarks)
 
             ttl_note = QLabel("注意：较慢的TTL可以提升解析稳定度，但会延长更新生效时间。")
             ttl_note.setWordWrap(True)
@@ -3997,121 +3362,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         else:
             QMessageBox.warning(self, "警告", "请先选择一个域名")
 
-    def start_ping(self):
-        target = self.target_input.text().strip()
-        ping_type = self.ping_type_combo.currentText()
-
-        if not target:
-            QMessageBox.warning(self, "警告", "请输入目标地址")
-            return
-
-        # 移除 http:// 和 https://
-        target = remove_http_https(target)
-
-        # 处理不同的 ping 类型
-        if ping_type == "ICMP":
-            if ':' in target:  # 如果包含端口，去除端口
-                target = target.split(':')[0]
-            if not (is_valid_ipv4(target) or is_valid_domain(target)):
-                QMessageBox.warning(self, "警告", "请输入有效的 IP 地址、域名或计算机名")
-                return
-        elif ping_type == "TCP":
-            if ':' not in target:
-                QMessageBox.information(self, "提示", "未指定端口，将使用默认端口 80")
-                target += ":80"
-        elif ping_type in ["HTTP", "HTTPS"]:
-            if ':' in target:
-                target = target.split(':')[0]
-        elif ping_type == "JavaMC":
-            if ':' not in target:
-                target += ":25565"
-        elif ping_type == "BedrockMC":
-            if ':' not in target:
-                target += ":19132"
-        elif ping_type == "API":
-            if ':' in target:
-                target = target.split(':')[0]
-
-        self.ping_result.clear()
-        self.ping_result.append(f"正在 ping {target}...")
-
-        if ping_type == "API":
-            self.api_ping(target)
-        else:
-            self.ping_thread = PingThread(target, ping_type)
-            self.ping_thread.update_signal.connect(self.update_ping_result)
-            self.ping_thread.start()
-
-    def api_ping(self, target):
-        try:
-            url = f"https://uapis.cn/api/ping?host={target}"
-            response = requests.get(url)
-            data = response.json()
-            if data['code'] == 200:
-                self.ping_result.append(f"API Ping 结果:")
-                self.ping_result.append(f"目标: {data['host']} (IP: {data['ip']})")
-                self.ping_result.append(f"位置: {data['location']}")
-                self.ping_result.append(f"最大延迟: {data['max']} ms")
-                self.ping_result.append(f"平均延迟: {data['avg']} ms")
-                self.ping_result.append(f"最小延迟: {data['min']} ms")
-            else:
-                self.ping_result.append(f"API Ping 失败: {data.get('msg', '未知错误')}")
-        except Exception as content:
-            self.ping_result.append(f"API Ping 错误: {str(content)}")
-
-    @staticmethod
-    def clean_minecraft_text(text):
-        if not isinstance(text, str):
-            return str(text)
-
-        # 移除所有格式代码（格式为 §x，其中x可以是任意字符）
-        import re
-        cleaned_text = re.sub('§[0-9a-fk-or]', '', text)
-        return cleaned_text
-
-    def update_ping_result(self, target, result):
-        try:
-            if isinstance(result, dict):
-                self.ping_result.append(f"Ping {target} 结果:")
-
-                # 处理 Minecraft 服务器响应
-                if '延迟' in result:
-                    self.ping_result.append(f"延迟: {result['延迟']:.2f} ms")
-                    if '版本' in result:
-                        self.ping_result.append(f"版本: {self.clean_minecraft_text(result['版本'])}")
-                    if '协议' in result:
-                        self.ping_result.append(f"协议版本: {result['协议']}")
-                    if '在线玩家' in result:
-                        self.ping_result.append(f"在线玩家: {result['在线玩家']}")
-                    if '最大玩家' in result:
-                        self.ping_result.append(f"最大玩家数: {result['最大玩家']}")
-                    if '描述' in result:
-                        self.ping_result.append(f"服务器描述: {self.clean_minecraft_text(result['描述'])}")
-                    if '游戏模式' in result:
-                        self.ping_result.append(f"游戏模式: {self.clean_minecraft_text(result['游戏模式'])}")
-                    if '地图' in result:
-                        self.ping_result.append(f"地图: {self.clean_minecraft_text(result['地图'])}")
-                else:
-                    # 常规 ping 统计
-                    if 'min' in result:
-                        self.ping_result.append(f"最小延迟: {result['min']:.2f} ms")
-                    if 'max' in result:
-                        self.ping_result.append(f"最大延迟: {result['max']:.2f} ms")
-                    if 'avg' in result:
-                        self.ping_result.append(f"平均延迟: {result['avg']:.2f} ms")
-                    if 'loss' in result:
-                        self.ping_result.append(f"丢包率: {result['loss']}%")
-
-            elif isinstance(result, (int, float)):
-                self.ping_result.append(f"Ping {target}: {result:.2f} ms")
-
-            else:
-                self.ping_result.append(f"Ping {target}: {str(result)}")
-
-        except Exception as content:
-            self.ping_result.append(f"处理 Ping {target} 结果时出错: {str(content)}")
-            self.logger.error(f"处理 ping 结果时出错: {str(content)}")
-
     def auto_update(self):
         """自动更新函数"""
         if self.token:
@@ -4170,35 +3420,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         if event.button() == Qt.MouseButton.LeftButton:
             self.dragging = False
 
-    def closeEvent(self, event):
-        # 停止所有运行中的隧道
-        with QMutexLocker(self.running_tunnels_mutex):
-            tunnels_to_stop = list(self.running_tunnels.keys())
 
-        for tunnel_name in tunnels_to_stop:
-            self.stop_single_tunnel(tunnel_name)
-
-        # 停止所有普通隧道
-        for tunnel_name, process in self.tunnel_processes.items():
-            try:
-                self.node_check_timer.stop()
-                process.terminate()
-                process.wait(timeout=5)
-                if process.poll() is None:
-                    process.kill()
-            except Exception as content:
-                self.logger.error(f"停止隧道 '{tunnel_name}' 时发生错误: {str(content)}")
-
-        # 强制杀死当前目录下的 frpc.exe 进程
-        try:
-            self.forcefully_terminate_frpc()
-        except Exception as content:
-            self.logger.error(f"终止 frpc.exe 进程时发生错误: {str(content)}")
-
-        # 调用原有的清理逻辑
-        time.sleep(1)
-
-        super().closeEvent(event)
 
     def forcefully_terminate_frpc(self):
         self.logger.info("正在终止当前目录下的 frpc.exe 进程...")
@@ -4405,8 +3627,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 				"""
 
         self.setStyleSheet(self.styleSheet() + refresh_button_style)
-        if hasattr(self, 'ip_tools_widget'):
-            self.ip_tools_widget.update_style(self.dark_theme)
+
 
     def refresh_nodes(self):
         """刷新节点状态"""
@@ -4422,10 +3643,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             self.content_stack.setCurrentIndex(2)
         elif tab_name == "node":
             self.content_stack.setCurrentIndex(3)
-        elif tab_name == "ping":
-            self.content_stack.setCurrentIndex(4)
-        elif tab_name == "ip_tools":
-            self.content_stack.setCurrentIndex(5)
+
 
         # 更新所有按钮的样式
         for button in self.tab_buttons:
@@ -4477,23 +3695,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                 self.logger.info(f"隧道 '{tunnel_name}' 已停止")
             else:
                 self.logger.warning(f"尝试停止不存在的隧道: {tunnel_name}")
-
-    def stop_all_tunnels(self):
-        self.stop_worker = StopWorker(self.running_tunnels, self.tunnel_processes, self.logger)
-        self.stop_thread = QThread()
-        self.stop_worker.moveToThread(self.stop_thread)
-        self.stop_thread.started.connect(self.stop_worker.run)
-        self.stop_worker.finished.connect(self.stop_thread.quit)
-        self.stop_worker.finished.connect(self.stop_worker.deleteLater)
-        self.stop_thread.finished.connect(self.stop_thread.deleteLater)
-        self.stop_thread.start()
-
-    def update_tunnel_ui(self):
-        for i in range(self.tunnel_container.layout().count()):
-            widget = self.tunnel_container.layout().itemAt(i).widget()
-            if isinstance(widget, TunnelCard):
-                widget.is_running = widget.tunnel_info['name'] in self.tunnel_processes
-                widget.update_status()
 
 
 class NodeCard(QFrame):
