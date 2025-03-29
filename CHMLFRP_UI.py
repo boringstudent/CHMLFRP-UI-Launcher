@@ -23,22 +23,18 @@ import win32security
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
 from PyQt6.QtWidgets import *
-from requests import *
 
-"""提权"""
-try:
-    current_process = win32api.GetCurrentProcess()
-    token = win32security.OpenProcessToken(current_process, win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY)
-    privilege_id = win32security.LookupPrivilegeValue(None, win32con.SE_DEBUG_NAME)
-    new_privileges = [(privilege_id, win32con.SE_PRIVILEGE_ENABLED)]
-    win32security.AdjustTokenPrivileges(token, False, new_privileges)
-except Exception as e:
-    print(f"提升权限时出错: {e}")
+# ------------------------------以下为程序信息--------------------
+# 程序信息
+APP_NAME = "CUL" # 程序名称
+APP_VERSION = "1.5.7" # 程序版本
+PY_VERSION = "3.13.2" # Python 版本
+WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
+Number_of_tunnels = 0 # 隧道数量
 
 def get_absolute_path(relative_path):
     """获取相对于程序目录的绝对路径"""
     return os.path.abspath(os.path.join(os.path.split(sys.argv[0])[0], relative_path))
-
 
 def check_file_empty(filename):
     """检查文件是否为空"""
@@ -51,39 +47,6 @@ def check_file_empty(filename):
         return os.path.getsize(file_path) == 0, "文件为空" if os.path.getsize(file_path) == 0 else "文件不为空"
     except OSError as e:
         return True, f"读取文件出错: {str(e)}"
-
-
-# ------------------------------以下为配置文件检查--------------------
-# 默认设置
-default_settings = {
-    "auto_start_tunnels": [],
-    "theme": "system",
-    "log_size_mb": 10,
-    "backup_count": 30
-}
-
-# 检查并创建settings.json
-is_empty, _ = check_file_empty("settings.json")
-if is_empty:
-    settings_path = get_absolute_path("settings.json")
-    with open(settings_path, 'w', encoding='utf-8') as f:
-        json.dump(default_settings, f, indent=4, ensure_ascii=False)
-
-# 检查并创建credentials.json
-is_empty, _ = check_file_empty("credentials.json")
-if is_empty:
-    credentials_path = get_absolute_path("credentials.json")
-    with open(credentials_path, 'w', encoding='utf-8') as f:
-        json.dump({}, f, indent=4, ensure_ascii=False)
-
-# ------------------------------以下为程序信息--------------------
-# 程序信息
-APP_NAME = "CUL" # 程序名称
-APP_VERSION = "1.5.7" # 程序版本
-PY_VERSION = "3.13.2" # Python 版本
-WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
-Number_of_tunnels = 0 # 隧道数量
-
 
 # 从配置文件加载日志设置
 try:
@@ -131,138 +94,214 @@ console_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
+class Pre_run_operations():
+    def __init__(self):
+        super().__init__()
 
-def is_valid_ipv4(ip):
-    pattern = re.compile(
-        r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$")
-    return bool(pattern.match(ip))
-
-def is_valid_domain(domain):
-    """域名检测"""
-    pattern = re.compile(r'^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z]{2,})+$')
-    return bool(pattern.match(domain))
-
-def is_valid_ipv6(ip):
-    """IPV6检测"""
-    try:
-        ipaddress.IPv6Address(ip)
-        return True
-    except ipaddress.AddressValueError:
-        return False
-
-
-def remove_http_https(url):
-    """htpp头去除"""
-    return re.sub(r'^https?://', '', url)
-
-
-def parse_srv_target(target):
-    """srv解析操作"""
-    parts = target.split()
-    if len(parts) == 4:
-        return parts[0], parts[1], parts[2], parts[3]
-    return None, None, None, target
-
-
-def validate_port(port):
-    """端口检查"""
-    try:
-        port_num = int(port)
-        return 0 < port_num <= 65535
-    except ValueError:
-        return False
-
-
-def get_nodes(max_retries=3, retry_delay=1):
-    """获取节点数据"""
-    url = "http://cf-v2.uapis.cn/node"
-    headers = get_headers()
-
-    for attempt in range(max_retries):
+    @classmethod
+    def elevation_rights(cls):
+        """提权"""
         try:
-            response = requests.post(url, headers=headers)
+            current_process = win32api.GetCurrentProcess()
+            token = win32security.OpenProcessToken(current_process,
+                                                   win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY)
+            privilege_id = win32security.LookupPrivilegeValue(None, win32con.SE_DEBUG_NAME)
+            new_privileges = [(privilege_id, win32con.SE_PRIVILEGE_ENABLED)]
+            win32security.AdjustTokenPrivileges(token, False, new_privileges)
+        except Exception as e:
+            print(f"提升权限时出错: {e}")
+
+    @classmethod
+    def document_checking(cls):
+        # 默认设置
+        default_settings = {
+            "auto_start_tunnels": [],
+            "theme": "system",
+            "log_size_mb": 10,
+            "backup_count": 30
+        }
+
+        # 检查并创建settings.json
+        is_empty, _ = check_file_empty("settings.json")
+        if is_empty:
+            settings_path = get_absolute_path("settings.json")
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(default_settings, f, indent=4, ensure_ascii=False)
+
+        # 检查并创建credentials.json
+        is_empty, _ = check_file_empty("credentials.json")
+        if is_empty:
+            credentials_path = get_absolute_path("credentials.json")
+            with open(credentials_path, 'w', encoding='utf-8') as f:
+                json.dump({}, f, indent=4, ensure_ascii=False)
+
+class enter_inspector():
+    def __init__(self):
+        super().__init__()
+
+    @staticmethod
+    def validate_port(port,tyen):
+        """端口检查"""
+        try:
+            port_num = int(port)
+            if tyen == True:
+                return 0 < port_num <= 65535
+            elif tyen == False:
+                return 10000 < port_num <= 65535
+        except ValueError:
+            return False
+
+    @staticmethod
+    def remove_http_https(url):
+        """htpp头去除"""
+        return re.sub(r'^https?://', '', url)
+
+    @staticmethod
+    def parse_srv_target(target):
+        """srv解析操作"""
+        parts = target.split()
+        if len(parts) == 4:
+            return parts[0], parts[1], parts[2], parts[3]
+        return None, None, None, target
+
+    @staticmethod
+    def is_valid_ipv6(ip):
+        """IPV6检测"""
+        try:
+            ipaddress.IPv6Address(ip)
+            return True
+        except ipaddress.AddressValueError:
+            return False
+
+    @staticmethod
+    def is_valid_domain(domain):
+        """域名检测"""
+        pattern = re.compile(r'^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z]{2,})+$')
+        return bool(pattern.match(domain))
+
+    @staticmethod
+    def is_valid_ipv4(ip):
+        """IPV4检测"""
+        pattern = re.compile(
+            r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$")
+        return bool(pattern.match(ip))
+
+class API():
+    def __init__(self):
+        super().__init__()
+
+    @classmethod
+    def login(cls, username, password):
+        """用户登录"""
+        logger.info(f"尝试登录用户: {username}")
+        url = f"https://cf-v2.uapis.cn/login"
+        params = {
+            "username": username,
+            "password": password
+        }
+        headers = get_headers()
+        try:
+            response = requests.get(url, headers=headers, params=params)
+            response_data = response.json()
+            return response_data
+        except Exception as content:
+            logger.exception("登录API发生错误")
+            logger.exception(content)
+            return None
+
+    @classmethod
+    def get_nodes(cls, max_retries=3, retry_delay=1):
+        """获取节点数据"""
+        url = "https://cf-v2.uapis.cn/node"
+        headers = get_headers()
+
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(url, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                if data['code'] == 200:
+                    return data['data']
+                else:
+                    logger.error(f"获取节点数据失败: {data['msg']}")
+                    return []
+            except requests.RequestException as content:
+                logger.warning(f"获取节点数据时发生网络错误 (尝试 {attempt + 1}/{max_retries}): {str(content)}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    logger.error("获取节点数据失败，已达到最大重试次数")
+                    return []
+            except Exception:
+                logger.exception("获取节点数据时发生未知错误")
+                return []
+
+    @classmethod
+    def is_node_online(cls, node_name=None, tyen=None):
+        url = "https://cf-v2.uapis.cn/node_stats"
+        headers = get_headers()
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                stats = response.json()
+
+                if tyen == "online":
+                    if stats and 'data' in stats:
+                        for node in stats['data']:
+                            if node['node_name'] == node_name:
+                                return node['state'] == "online"
+                elif tyen == "all":
+                    if node_name is not None:
+                        raise ValueError("当tyen为'all'时，不能传入node_name参数")
+                    return stats
+
+            return False
+        except Exception:
+            logger.exception("检查节点在线状态时发生错误")
+            return False
+
+    @classmethod
+    def get_user_tunnels(cls, user_token):
+        """获取用户隧道列表"""
+        url = f"https://cf-v2.uapis.cn/tunnel"
+        params = {
+            "token": user_token
+        }
+        headers = get_headers()
+        try:
+            response = requests.get(url, headers=headers, params=params)
             response.raise_for_status()
             data = response.json()
             if data['code'] == 200:
-                return data['data']
+                tunnels = data.get("data", [])
+                return tunnels
             else:
-                logger.error(f"获取节点数据失败: {data['msg']}")
+                logger.error(f" {data.get('msg')}")
                 return []
-        except RequestException as content:
-            logger.warning(f"获取节点数据时发生网络错误 (尝试 {attempt + 1}/{max_retries}): {str(content)}")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-            else:
-                logger.error("获取节点数据失败，已达到最大重试次数")
-                return []
+
+        except requests.RequestException:
+            logger.exception("获取隧道列表时发生网络错误")
+            return []
         except Exception:
-            logger.exception("获取节点数据时发生未知错误")
+            logger.exception("获取隧道列表时发生未知错误")
             return []
 
+    @classmethod
+    def userinfo(cls,user_token):
+        """用户信息"""
+        url = f"https://cf-v2.uapis.cn/userinfo"
+        headers = get_headers()
+        params = {
+            "token": user_token
+        }
+        try:
+            data = requests.get(url, params=params, headers=headers).json()
+            return data
+        except Exception as content:
+            logger.exception("用户信息API发生错误")
+            logger.exception(content)
+            return None
 
-def login(username, password):
-    """用户登录返回token"""
-    logger.info(f"尝试登录用户: {username}")
-    url = f"http://cf-v2.uapis.cn/login"
-    params = {
-        "username": username,
-        "password": password
-    }
-    headers = get_headers()
-    try:
-        response = requests.get(url, headers=headers, params=params)
-        response_data = response.json()
-        user_token = response_data.get("data", {}).get("usertoken")
-        if user_token:
-            logger.info("登录成功")
-        else:
-            logger.warning("登录失败")
-        return user_token
-    except Exception as content:
-        logger.exception("登录时发生错误")
-        logger.exception(content)
-        return None
-
-def get_user_tunnels(user_token):
-    """获取用户隧道列表"""
-    url = f"http://cf-v2.uapis.cn/tunnel"
-    params = {
-        "token": user_token
-    }
-    headers = get_headers()
-    try:
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        data = response.json()
-        if data['code'] == 200:
-            tunnels = data.get("data", [])
-            return tunnels
-        else:
-            logger.error(f" {data.get('msg')}")
-            return []
-
-    except requests.RequestException:
-        logger.exception("获取隧道列表时发生网络错误")
-        return []
-    except Exception:
-        logger.exception("获取隧道列表时发生未知错误")
-        return []
-
-def is_node_online(node_name):
-    url = "http://cf-v2.uapis.cn/node_stats"
-    headers = get_headers()
-    try:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            stats = response.json()
-            if stats and 'data' in stats:
-                for node in stats['data']:
-                    if node['node_name'] == node_name:
-                        return node['state'] == "online"
-        return False
-    except Exception:
-        logger.exception("检查节点在线状态时发生错误")
-        return False
 
 class QtHandler(QObject, logging.Handler):
     """Qt日志处理器"""
@@ -351,7 +390,7 @@ class TunnelCard(QFrame):
                 self.node_domain = data['data']['ip']
                 self.update_link_label()
         except Exception as content:
-            print(f"Error fetching node info: {content}")
+            print(f"获取节点信息时出错: {content}")
 
     def get_link(self):
         tunnel_type = self.tunnel_info.get('type', '').lower()
@@ -365,11 +404,9 @@ class TunnelCard(QFrame):
             port = self.tunnel_info.get('dorp', '')
             return f"{domain}:{port}"
 
-
     def update_link_label(self):
         if hasattr(self, 'link_label'):
             self.link_label.setText(f"连接: {self.get_link()}")
-
 
     def copy_link(self, event):
         link = self.get_link()
@@ -436,7 +473,6 @@ class TunnelCard(QFrame):
             self.setStyleSheet(self.styleSheet().replace(
                 "TunnelCard { border: 2px solid #0066cc; background-color: rgba(224, 224, 224, 50); }", ""))
 
-
 class BatchEditDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -445,7 +481,7 @@ class BatchEditDialog(QDialog):
 
         self.node_combo = QComboBox()
         self.node_combo.addItem("不修改")
-        self.node_combo.addItems([node['name'] for node in get_nodes()])
+        self.node_combo.addItems([node['name'] for node in API.get_nodes()])
 
         self.type_combo = QComboBox()
         self.type_combo.addItem("不修改")
@@ -487,7 +523,6 @@ class BatchEditDialog(QDialog):
         if self.remote_port_input.text():
             changes['dorp'] = self.remote_port_input.text()
         return changes
-
 
 class DomainCard(QFrame):
     clicked = pyqtSignal(object)
@@ -636,7 +671,6 @@ class StopWorker(QObject):
         else:
             self.progress.emit("没有发现残留的 frpc.exe 进程")
 
-
 class OutputDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -694,7 +728,6 @@ class OutputDialog(QDialog):
 
         # 滚动到顶部 以显示最新的输出
         self.output_text_edit.verticalScrollBar().setValue(0)
-
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
@@ -1055,7 +1088,7 @@ class SettingsDialog(QDialog):
 
             if self.parent.token:
                 # 获取用户的隧道列表
-                tunnels = get_user_tunnels(self.parent.token)
+                tunnels = API.get_user_tunnels(self.parent.token)
                 if tunnels:
                     for tunnel in tunnels:
                         item = QListWidgetItem(tunnel['name'])
@@ -1160,6 +1193,74 @@ class SettingsDialog(QDialog):
         except Exception as content:
             QMessageBox.warning(self, "错误", f"保存设置失败: {str(content)}")
 
+class NodeCard(QFrame):
+    clicked = pyqtSignal(object)
+    def __init__(self, node_info):
+        super().__init__()
+        self.node_info = node_info
+        self.initUI()
+        self.updateStyle()
+
+    def initUI(self):
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        name_label = QLabel(f"<b>{self.node_info.get('node_name', 'N/A')}</b>")
+        name_label.setObjectName("nameLabel")
+        group_label = QLabel(f"节点组: {self.node_info.get('nodegroup', 'N/A')}")
+        cpu_label = QLabel(f"CPU使用率: {self.node_info.get('cpu_usage', 'N/A')}%")
+        bandwidth_label = QLabel(f"带宽使用率: {self.node_info.get('bandwidth_usage_percent', 'N/A')}%")
+
+        layout.addWidget(name_label)
+        layout.addWidget(group_label)
+        layout.addWidget(cpu_label)
+        layout.addWidget(bandwidth_label)
+
+        self.setLayout(layout)
+        self.setFixedSize(250, 150)
+
+    def updateStyle(self):
+        self.setStyleSheet("""
+			NodeCard {
+				border: 1px solid #d0d0d0;
+				border-radius: 5px;
+				padding: 10px;
+				margin: 5px;
+			}
+			NodeCard:hover {
+				background-color: rgba(240, 240, 240, 50);
+			}
+			#nameLabel {
+				font-size: 16px;
+				font-weight: bold;
+			}
+		""")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if self.node_info.get('state') == 'online':
+            color = QColor(0, 255, 0)  # 绿色
+        else:
+            color = QColor(255, 0, 0)  # 红色
+        painter.setPen(QPen(color, 2))
+        painter.setBrush(color)
+        painter.drawEllipse(self.width() - 20, 10, 10, 10)
+
+    def setSelected(self, selected):
+        if selected:
+            self.setStyleSheet(
+                self.styleSheet() + "NodeCard { border: 2px solid #0066cc; background-color: rgba(224, 224, 224, 50); }")
+        else:
+            self.setStyleSheet(self.styleSheet().replace(
+                "NodeCard { border: 2px solid #0066cc; background-color: rgba(224, 224, 224, 50); }", ""))
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self.node_info)
+        super().mousePressEvent(event)
 
 class MainWindow(QMainWindow):
     """主窗口"""
@@ -1416,7 +1517,7 @@ class MainWindow(QMainWindow):
                 settings_content = json.load(file_contents)
                 auto_start_tunnels = settings_content.get('auto_start_tunnels', [])
 
-            tunnels = get_user_tunnels(self.token)
+            tunnels = API.get_user_tunnels(self.token)
             if tunnels:
                 for tunnel in tunnels:
                     if tunnel['name'] in auto_start_tunnels:
@@ -1448,7 +1549,7 @@ class MainWindow(QMainWindow):
         if not self.token:
             return
 
-        tunnels = get_user_tunnels(self.token)
+        tunnels = API.get_user_tunnels(self.token)
         if tunnels is None:
             return
 
@@ -1456,7 +1557,7 @@ class MainWindow(QMainWindow):
             tunnel_info = next((t for t in tunnels if t['name'] == tunnel_name), None)
             if tunnel_info:
                 node_name = tunnel_info['node']
-                if not is_node_online(node_name):
+                if not API.is_node_online(node_name, tyen="online"):
                     self.logger.warning(f"节点 {node_name} 离线，停止隧道 {tunnel_name}")
                     self.stop_tunnel({"name": tunnel_name})
                     QMessageBox.warning(self, "节点离线", f"节点 {node_name} 离线，隧道 {tunnel_name} 已停止")
@@ -1527,13 +1628,13 @@ class MainWindow(QMainWindow):
 
                     # 验证本地端口是否有效
                     if "nport" in changes:
-                        if not validate_port(changes["nport"]):
+                        if not enter_inspector.validate_port(tunnel_info["nport"],True):
                             raise ValueError(f"隧道 '{tunnel_info['name']}': 本地端口必须是1-65535之间的整数")
                         payload["localport"] = int(changes["nport"])
 
                     # 验证远程端口是否有效
                     if "dorp" in changes:
-                        if not validate_port(changes["dorp"]):
+                        if not enter_inspector.validate_port(tunnel_info["dorp"],False):
                             raise ValueError(f"隧道 '{tunnel_info['name']}': 远程端口必须是10000-65535之间的整数")
                         payload["remoteport"] = int(changes["dorp"])
 
@@ -1735,7 +1836,7 @@ class MainWindow(QMainWindow):
             type_combo.setCurrentText(tunnel_info['type'])
 
         # 获取节点列表并设置当前选中项
-        nodes = get_nodes()
+        nodes = API.get_nodes()
         for node in nodes:
             node_combo.addItem(node['name'])
         if tunnel_info:
@@ -1834,7 +1935,7 @@ class MainWindow(QMainWindow):
 
                 # 根据类型设置端口或域名
                 if port_type in ["tcp", "udp"]:
-                    if not validate_port(remote_port):
+                    if not enter_inspector.validate_port(remote_port,False):
                         raise ValueError("远程端口必须是10000-65535之间的整数")
                     payload["remoteport"] = int(remote_port)
                 elif port_type in ["http", "https"]:
@@ -2181,9 +2282,14 @@ class MainWindow(QMainWindow):
             self.logger.info("使用保存的Token自动登录")
             self.login_success()
         elif self.username_input.text() and self.password_input.text():
-            self.token = login(self.username_input.text(), self.password_input.text())
+
+            self.token = API.login(self.username_input.text(), self.password_input.text()).get("data", {}).get("usertoken")
             if self.token:
-                self.logger.info("使用保存的密码自动登录成功")
+                logger.info("登录成功")
+            else:
+                logger.warning("登录失败")
+
+            if self.token:
                 self.login_success()
             else:
                 self.logger.warning("自动登录失败，请手动登录")
@@ -2193,13 +2299,7 @@ class MainWindow(QMainWindow):
         user_token = self.token_input.text()
         if user_token:
             try:
-                url = f"http://cf-v2.uapis.cn/userinfo"
-                headers = get_headers()
-                params = {
-                    "token": user_token
-                }
-                response = requests.get(url, params=params, headers=headers)
-                data = response.json()
+                data = API.userinfo(user_token)
                 if data['code'] == 200:
                     self.token = user_token
                 else:
@@ -2212,14 +2312,8 @@ class MainWindow(QMainWindow):
                 return
         else:
             try:
-                url = f"http://cf-v2.uapis.cn/login"
-                headers = get_headers()
-                params = {
-                    "username": self.username_input.text(),
-                    "password": self.password_input.text()
-                }
-                response = requests.get(url, headers=headers, params=params)
-                data = response.json()
+                data = API.login(self.username_input.text(), self.password_input.text())
+
                 if data['code'] == 200:
                     self.token = data['data']['usertoken']
                 else:
@@ -2239,13 +2333,8 @@ class MainWindow(QMainWindow):
     def login_success(self):
         """登录成功后的操作"""
         try:
-            # 首先验证token是否有效
-            url = f"http://cf-v2.uapis.cn/userinfo"
-            headers = get_headers()
-            params = {"token": self.token}
-            response = requests.get(url, params=params, headers=headers)
-            data = response.json()
-
+            # 验证token是否有效
+            data = API.userinfo(self.token)
             if data['code'] != 200:
                 # token无效,执行登出操作
                 self.logger.error(f"Token无效: {data.get('msg', '未知错误')}")
@@ -2268,7 +2357,6 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "错误", f"登录成功，但加载数据失败: {str(content)}")
             self.logout()
 
-
     def logout(self):
         """退出登录"""
         # 停止所有使用token的操作
@@ -2288,7 +2376,6 @@ class MainWindow(QMainWindow):
         try:
             with open(credentials_path, 'w') as file_contents:
                 json.dump({}, file_contents)
-            self.logger.info("凭证文件已清空")
         except Exception as content:
             self.logger.error(f"清空凭证文件时发生错误: {str(content)}")
 
@@ -2308,7 +2395,7 @@ class MainWindow(QMainWindow):
     def load_user_data(self):
         """加载用户数据"""
         try:
-            self.user_info = self.get_user_info()
+            self.user_info = API.userinfo(self.token)['data']
             self.load_tunnels()
             self.load_domains()
             self.load_nodes()
@@ -2317,25 +2404,6 @@ class MainWindow(QMainWindow):
             self.logger.error(f"加载用户数据时发生错误: {str(content)}")
             self.logger.error(traceback.format_exc())
             self.show_error_message(f"加载用户数据时发生错误: {str(content)}")
-
-    def get_user_info(self):
-        """获取用户信息"""
-        url = f"http://cf-v2.uapis.cn/userinfo"
-        params = {
-            "token": self.token
-        }
-        headers = get_headers()
-        try:
-            response = requests.get(url, headers=headers, params=params)
-            data = response.json()
-            if data['code'] == 200:
-                return data['data']
-            else:
-                self.logger.error(f"获取用户信息失败: {data['msg']}")
-                return None
-        except Exception:
-            self.logger.exception("获取用户信息时发生错误")
-            return None
 
     def display_user_info(self):
         if self.user_info['term'] == "9999-09-09":
@@ -2377,7 +2445,7 @@ class MainWindow(QMainWindow):
                 self.show_error_message("未登录，无法加载隧道列表")
                 return
 
-            tunnels = get_user_tunnels(self.token)
+            tunnels = API.get_user_tunnels(self.token)
             if tunnels is None:
                 return
 
@@ -2492,16 +2560,7 @@ class MainWindow(QMainWindow):
     def load_nodes(self):
         """加载节点列表"""
         try:
-            url = "http://cf-v2.uapis.cn/node_stats"
-            headers = get_headers()
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            if data['code'] != 200:
-                raise ValueError(data.get('msg', '未知错误'))
-
-            nodes = data['data']
-
+            nodes = API.is_node_online(tyen="all")['data']
             # 清除现有的节点卡片
             while self.node_container.layout().count():
                 item = self.node_container.layout().takeAt(0)
@@ -2573,7 +2632,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
     def start_tunnel(self, tunnel_info):
         try:
             # 检查节点状态
-            if not is_node_online(tunnel_info['node']):
+            if not API.is_node_online(tunnel_info['node'], tyen="online"):
                 QMessageBox.warning(self, "警告", f"节点 {tunnel_info['node']} 当前不在线")
                 return
 
@@ -2832,22 +2891,16 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         try:
             # 清除隧道列表
             self.clear_layout(self.tunnel_container.layout())
-
             # 清除域名列表
             self.clear_layout(self.domain_container.layout())
-
             # 清除节点列表
             self.clear_layout(self.node_container.layout())
-
             # 清除用户信息显示
             self.user_info_display.clear()
-
             # 重置其他相关状态
             self.selected_tunnels = []
             self.selected_domain = None
             self.selected_node = None
-
-            self.logger.info("用户数据已清除")
         except Exception as content:
             self.logger.error(f"清除用户数据时发生错误: {str(content)}")
 
@@ -2899,22 +2952,9 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
         tunnels_to_delete = self.selected_tunnels.copy()
 
-        try:
-            url = f"http://cf-v2.uapis.cn/userinfo?token={self.token}"
-            response = requests.get(url)
-            if response.status_code == 200:
-                user_info = response.json()
-                if user_info["code"] == 200:
-                    user_id = user_info["data"]["id"]
-                    user_token = user_info["data"]["usertoken"]
-                else:
-                    raise Exception(f"Failed to get user info from v2: {user_info['msg']}")
-            else:
-                raise Exception(f"Failed to fetch user info, status code {response.status_code}")
-        except Exception as content:
-            self.logger.error(f"Error fetching user info: {str(content)}")
-            QMessageBox.warning(self, "错误", f"无法获取用户信息: {str(content)}")
-            return
+        user_info = API.userinfo(self.token)
+        user_id = user_info["data"]["id"]
+        user_token = user_info["data"]["usertoken"]
 
         for tunnel_info in tunnels_to_delete:
             time.sleep(0.8)  # 避免频繁请求导致服务器拒绝连接
@@ -2923,6 +2963,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
             if reply == QMessageBox.StandardButton.Yes:
                 try:
+
                     url_v2 = f"http://cf-v2.uapis.cn/deletetunnel"
                     params = {"token": self.token, "tunnelid": tunnel_info["id"]}
                     headers = get_headers()
@@ -2933,6 +2974,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     else:
                         self.logger.error(f"v2 API 删除隧道失败")
                         raise Exception(f"v2 API 删除失败")
+
                 except Exception:
                     self.logger.error(f"v2 API 删除失败，尝试 v1 API...")
                     try:
@@ -3019,10 +3061,10 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             record_type = type_combo.currentText()
-            target = remove_http_https(target_input.text().strip())
+            target = enter_inspector.remove_http_https()
 
             if record_type == "A":
-                if is_valid_domain(target):
+                if enter_inspector.is_valid_domain(target):
                     reply = QMessageBox.question(self, "域名输入",
                                                  "您输入了一个域名。您希望如何处理？yes=解析:no=切换到CNAME",
                                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -3031,9 +3073,9 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                         # 用户选择解析为 IPv4
                         try:
                             ip = socket.gethostbyname(target)
-                            if is_valid_ipv4(ip):
+                            if enter_inspector.is_valid_ipv4(ip):
                                 target = ip
-                            elif is_valid_ipv6(ip):
+                            elif enter_inspector.is_valid_ipv6():
                                 ipv6_reply = QMessageBox.question(self, "IPv6 检测",
                                                                   "解析结果是 IPv6 地址。是否要切换到 AAAA 记录？",
                                                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -3056,7 +3098,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     else:
                         # 用户选择使用 CNAME
                         record_type = "CNAME"
-                elif is_valid_ipv6(target):
+                elif enter_inspector.is_valid_ipv6():
                     reply = QMessageBox.question(self, "IPv6地址检测",
                                                  "检测到IPv6地址。是否要切换到AAAA记录？",
                                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -3065,12 +3107,12 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     else:
                         QMessageBox.warning(self, "无效IP", "A记录必须使用IPv4地址")
                         return
-                elif not is_valid_ipv4(target):
+                elif not enter_inspector.is_valid_ipv4(target):
                     QMessageBox.warning(self, "无效 IP", "请输入有效的 IPv4 地址")
                     return
 
             elif record_type == "AAAA":
-                if is_valid_ipv4(target):
+                if enter_inspector.is_valid_ipv4(target):
                     reply = QMessageBox.question(self, "IPv4地址检测",
                                                  "检测到IPv4地址。是否要切换到A记录？",
                                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -3079,7 +3121,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     else:
                         QMessageBox.warning(self, "无效IP", "AAAA记录必须使用IPv6地址")
                         return
-                elif is_valid_domain(target):
+                elif enter_inspector.is_valid_domain(target):
                     reply = QMessageBox.question(self, "域名输入",
                                                  "您输入了一个域名。您希望如何处理？yes=解析:no=切换到CNAME",
                                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -3088,9 +3130,9 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                         # 用户选择解析为 IPv6
                         try:
                             ip = socket.getaddrinfo(target, None, socket.AF_INET6)[0][4][0]
-                            if is_valid_ipv6(ip):
+                            if enter_inspector.is_valid_ipv6():
                                 target = ip
-                            elif is_valid_ipv4(ip):
+                            elif enter_inspector.is_valid_ipv4(ip):
                                 ipv4_reply = QMessageBox.question(self, "IPv4 检测",
                                                                   "解析结果是 IPv4 地址。是否要切换到 A 记录？",
                                                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -3113,12 +3155,12 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     else:
                         # 用户选择使用 CNAME
                         record_type = "CNAME"
-                elif not is_valid_ipv6(target):
+                elif not enter_inspector.is_valid_ipv6():
                     QMessageBox.warning(self, "无效 IP", "请输入有效的 IPv6 地址")
                     return
 
             elif record_type == "CNAME":
-                if is_valid_ipv4(target):
+                if enter_inspector.is_valid_ipv4(target):
                     reply = QMessageBox.question(self, "IPv4 地址检测",
                                                  "检测到 IPv4 地址。是否要切换到 A 记录？",
                                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -3127,7 +3169,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     else:
                         QMessageBox.warning(self, "无效 CNAME", "CNAME 记录不能指向 IP 地址")
                         return
-                elif is_valid_ipv6(target):
+                elif enter_inspector.is_valid_ipv6():
                     reply = QMessageBox.question(self, "IPv6 地址检测",
                                                  "检测到 IPv6 地址。是否要切换到 AAAA 记录？",
                                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -3136,7 +3178,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     else:
                         QMessageBox.warning(self, "无效 CNAME", "CNAME 记录不能指向 IP 地址")
                         return
-                elif not is_valid_domain(target):
+                elif not enter_inspector.is_valid_domain(target):
                     QMessageBox.warning(self, "无效域名", "请输入有效的域名")
                     return
 
@@ -3157,9 +3199,9 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                         port_input.setText(srv_port)
                     srv_target = srv_target.strip('[]')
 
-                if is_valid_domain(srv_target):
-                    srv_target = remove_http_https(srv_target)
-                elif not (is_valid_ipv4(srv_target) or is_valid_ipv6(srv_target)):
+                if enter_inspector.is_valid_domain(srv_target):
+                    srv_target = enter_inspector.remove_http_https()
+                elif not (enter_inspector.is_valid_ipv4(srv_target) or enter_inspector.is_valid_ipv6()):
                     QMessageBox.warning(self, "无效SRV目标", "SRV目标必须是有效的域名或IP地址")
                     return
 
@@ -3253,7 +3295,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             port_input = QLineEdit()
 
             if domain_info['type'] == "SRV":
-                priority, weight, port, srv_target = parse_srv_target(domain_info['target'])
+                priority, weight, port, srv_target = enter_inspector.parse_srv_target()
                 priority_input.setText(priority or "")
                 weight_input.setText(weight or "")
                 port_input.setText(port or "")
@@ -3272,20 +3314,20 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 record_type = domain_info['type']
-                target = remove_http_https(target_input.text().strip())
+                target = enter_inspector.remove_http_https()
 
                 # 验证输入
-                if record_type == "A" and not is_valid_ipv4(target):
+                if record_type == "A" and not enter_inspector.is_valid_ipv4(target):
                     QMessageBox.warning(self, "无效IP", "请输入有效的IPv4地址")
                     return
-                elif record_type == "AAAA" and not is_valid_ipv6(target):
+                elif record_type == "AAAA" and not enter_inspector.is_valid_ipv6():
                     QMessageBox.warning(self, "无效IP", "请输入有效的IPv6地址")
                     return
                 elif record_type == "CNAME":
-                    if is_valid_ipv4(target) or is_valid_ipv6(target):
+                    if enter_inspector.is_valid_ipv4(target) or enter_inspector.is_valid_ipv6():
                         QMessageBox.warning(self, "无效CNAME", "CNAME记录不能指向IP地址")
                         return
-                    elif not is_valid_domain(target):
+                    elif not enter_inspector.is_valid_domain(target):
                         QMessageBox.warning(self, "无效域名", "请输入有效的目标域名")
                         return
                 elif record_type == "SRV":
@@ -3298,8 +3340,8 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     if ':' in srv_target:  # 可能是IPv6
                         srv_target = f"[{srv_target}]"
 
-                    if not is_valid_domain(srv_target) and not is_valid_ipv4(srv_target) and not is_valid_ipv6(
-                            srv_target.strip('[]')):
+                    if not enter_inspector.is_valid_domain(srv_target) and not enter_inspector.is_valid_ipv4(srv_target) and not enter_inspector.is_valid_ipv6(
+                    ):
                         QMessageBox.warning(self, "无效SRV目标", "SRV目标必须是有效的域名或IP地址")
                         return
 
@@ -3397,7 +3439,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             except Exception as content:
                 self.logger.error(f"下载或处理文件时发生错误: {str(content)}")
 
-
     def mousePressEvent(self, event):
         """鼠标按下事件"""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -3418,8 +3459,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         """鼠标释放事件"""
         if event.button() == Qt.MouseButton.LeftButton:
             self.dragging = False
-
-
 
     def forcefully_terminate_frpc(self):
         self.logger.info("正在终止当前目录下的 frpc.exe 进程...")
@@ -3505,7 +3544,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         current_index = self.content_stack.currentIndex()
         if current_index < len(self.tab_buttons):
             self.update_button_styles(self.tab_buttons[current_index])
-
 
     def apply_theme(self):
         if self.dark_theme:
@@ -3627,7 +3665,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
         self.setStyleSheet(self.styleSheet() + refresh_button_style)
 
-
     def refresh_nodes(self):
         """刷新节点状态"""
         self.load_nodes()
@@ -3679,9 +3716,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     }}
                 """)
 
-
-
-
     def stop_single_tunnel(self, tunnel_name):
         with QMutexLocker(self.running_tunnels_mutex):
             if tunnel_name in self.running_tunnels:
@@ -3695,77 +3729,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             else:
                 self.logger.warning(f"尝试停止不存在的隧道: {tunnel_name}")
 
-
-class NodeCard(QFrame):
-    clicked = pyqtSignal(object)
-    def __init__(self, node_info):
-        super().__init__()
-        self.node_info = node_info
-        self.initUI()
-        self.updateStyle()
-
-    def initUI(self):
-        layout = QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
-
-        name_label = QLabel(f"<b>{self.node_info.get('node_name', 'N/A')}</b>")
-        name_label.setObjectName("nameLabel")
-        group_label = QLabel(f"节点组: {self.node_info.get('nodegroup', 'N/A')}")
-        cpu_label = QLabel(f"CPU使用率: {self.node_info.get('cpu_usage', 'N/A')}%")
-        bandwidth_label = QLabel(f"带宽使用率: {self.node_info.get('bandwidth_usage_percent', 'N/A')}%")
-
-        layout.addWidget(name_label)
-        layout.addWidget(group_label)
-        layout.addWidget(cpu_label)
-        layout.addWidget(bandwidth_label)
-
-        self.setLayout(layout)
-        self.setFixedSize(250, 150)
-
-    def updateStyle(self):
-        self.setStyleSheet("""
-			NodeCard {
-				border: 1px solid #d0d0d0;
-				border-radius: 5px;
-				padding: 10px;
-				margin: 5px;
-			}
-			NodeCard:hover {
-				background-color: rgba(240, 240, 240, 50);
-			}
-			#nameLabel {
-				font-size: 16px;
-				font-weight: bold;
-			}
-		""")
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        if self.node_info.get('state') == 'online':
-            color = QColor(0, 255, 0)  # 绿色
-        else:
-            color = QColor(255, 0, 0)  # 红色
-        painter.setPen(QPen(color, 2))
-        painter.setBrush(color)
-        painter.drawEllipse(self.width() - 20, 10, 10, 10)
-
-    def setSelected(self, selected):
-        if selected:
-            self.setStyleSheet(
-                self.styleSheet() + "NodeCard { border: 2px solid #0066cc; background-color: rgba(224, 224, 224, 50); }")
-        else:
-            self.setStyleSheet(self.styleSheet().replace(
-                "NodeCard { border: 2px solid #0066cc; background-color: rgba(224, 224, 224, 50); }", ""))
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self.node_info)
-        super().mousePressEvent(event)
-
-
 if __name__ == '__main__':
     def exception_hook(exctype, value, main_thread):
         while main_thread:
@@ -3773,6 +3736,8 @@ if __name__ == '__main__':
         sys.__excepthook__(exctype, value, main_thread)
 
     sys.excepthook = exception_hook
+    Pre_run_operations.elevation_rights() #提权
+    Pre_run_operations.document_checking() #配置文件检查
 
     try:
         app = QApplication(sys.argv)
