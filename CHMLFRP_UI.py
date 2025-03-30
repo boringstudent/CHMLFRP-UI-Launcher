@@ -10,7 +10,9 @@ import sys
 import threading
 import time
 import traceback
+import urllib
 import winreg
+import zipfile
 from datetime import datetime
 from logging.handlers import *
 
@@ -20,9 +22,13 @@ import requests
 import win32api
 import win32con
 import win32security
+import ctypes
+import tempfile
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
 from PyQt6.QtWidgets import *
+from dns.resolver import Resolver, NoNameservers, NXDOMAIN, NoAnswer, Timeout
+
 
 # ------------------------------以下为程序信息--------------------
 # 程序信息
@@ -31,6 +37,9 @@ APP_VERSION = "1.5.7" # 程序版本
 PY_VERSION = "3.13.2" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
+PSEXEC_PATH = "PsExec.exe" if os.path.exists("PsExec.exe") else "PsExec"
+PSTOOLS_URL = "https://download.sysinternals.com/files/PSTools.zip"
+PSEXEC_EXE = "PsExec.exe"
 
 def get_absolute_path(relative_path):
     """获取相对于程序目录的绝对路径"""
@@ -99,24 +108,129 @@ class Pre_run_operations():
         super().__init__()
 
     @classmethod
-    def elevation_rights(cls):
-        """提升为DEBUG权限"""
+    def _ensure_psexec(cls) -> bool:
+        """确保 PsExec.exe 存在，否则自动下载"""
+        if os.path.exists(PSEXEC_EXE):
+            return True
+
+        print("PsExec 未找到，尝试下载...")
         try:
-            # 获取当前进程令牌
+            # 下载 PSTools.zip
+            temp_dir = tempfile.mkdtemp()
+            zip_path = os.path.join(temp_dir, "PSTools.zip")
+            urllib.request.urlretrieve(PSTOOLS_URL, zip_path)
+
+            # 解压并提取 PsExec.exe
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extract(PSEXEC_EXE, temp_dir)
+
+            # 移动到当前目录
+            os.rename(os.path.join(temp_dir, PSEXEC_EXE), PSEXEC_EXE)
+            print("PsExec 下载成功！")
+            return True
+        except Exception as e:
+            print(f"下载 PsExec 失败: {e}")
+            return False
+
+    @classmethod
+    def is_admin(cls) -> bool:
+        """检查当前是否以管理员身份运行"""
+        try:
+            return ctypes.windll.shell32.IsUserAnAdmin()
+        except:
+            return False
+
+    @classmethod
+    def run_as_admin(cls) -> bool:
+        """以管理员身份重新运行程序"""
+        try:
+            ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", sys.executable, " ".join(sys.argv), None, 1
+            )
+            sys.exit(0)
+            return True
+        except Exception as e:
+            print(f"管理员提权失败: {e}")
+            return False
+
+    @classmethod
+    def enable_debug_privilege(cls) -> bool:
+        """启用 SeDebugPrivilege 权限"""
+        try:
             token = win32security.OpenProcessToken(
                 win32api.GetCurrentProcess(),
                 win32security.TOKEN_ADJUST_PRIVILEGES | win32security.TOKEN_QUERY
             )
-
-            # 启用SE_DEBUG_NAME权限
-            privilege = win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME)
+            priv = win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME)
             win32security.AdjustTokenPrivileges(
                 token,
                 False,
-                [(privilege, win32security.SE_PRIVILEGE_ENABLED)]
+                [(priv, win32security.SE_PRIVILEGE_ENABLED)]
             )
+            return win32api.GetLastError() == 0
         except Exception as e:
-            logger.error(f"提权失败: {e}")
+            print(f"SeDebugPrivilege 启用失败: {e}")
+            return False
+
+    @classmethod
+    def run_as_trusted_installer(cls) -> bool:
+        """使用 PsExec 以 SYSTEM 权限运行（接近 TrustedInstaller）"""
+        if not cls._ensure_psexec():
+            return False
+
+        try:
+            # -i: 交互式, -s: SYSTEM 权限, -accepteula: 自动接受协议
+            cmd = [PSEXEC_EXE, "-i", "-s", "-accepteula", sys.executable] + sys.argv
+            subprocess.run(cmd, check=True)
+            sys.exit(0)
+            return True
+        except Exception as e:
+            print(f"TrustedInstaller 提权失败: {e}")
+            return False
+
+    @classmethod
+    def test_registry_access(cls) -> bool:
+        """测试是否有注册表写入权限（示例：尝试写入 HKLM）"""
+        try:
+            key = win32api.RegCreateKey(
+                win32con.HKEY_LOCAL_MACHINE,
+                "SOFTWARE\\TestKey"
+            )
+            win32api.RegCloseKey(key)
+            win32api.RegDeleteKey(win32con.HKEY_LOCAL_MACHINE, "SOFTWARE\\TestKey")
+            return True
+        except Exception as e:
+            print(f"注册表访问失败: {e}")
+            return False
+
+    @classmethod
+    def elevation_rights(cls):
+        """
+        提权逻辑：
+        1. 检查是否已有权限修改注册表
+        2. 如果没有，尝试启用 SeDebugPrivilege
+        3. 如果仍然失败，尝试以 TrustedInstaller 运行（使用 PsExec）
+        """
+        if cls.test_registry_access():
+            print("已有足够权限，无需提权")
+            return True
+
+        print("当前权限不足，尝试提权...")
+
+        # 1. 如果不是管理员，先提权到管理员
+        if not cls.is_admin():
+            print("当前非管理员，尝试提权...")
+            return cls.run_as_admin()
+
+        # 2. 尝试启用 SeDebugPrivilege
+        if cls.enable_debug_privilege():
+            print("SeDebugPrivilege 启用成功，再次尝试...")
+            if cls.test_registry_access():
+                return True
+
+        # 3. 如果仍然失败，使用 PsExec 以 TrustedInstaller 运行
+        print("SeDebugPrivilege 仍不足，尝试 TrustedInstaller...")
+        return cls.run_as_trusted_installer()
 
     @classmethod
     def document_checking(cls):
