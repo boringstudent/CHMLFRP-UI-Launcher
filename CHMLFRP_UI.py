@@ -315,7 +315,10 @@ class enter_inspector():
     @staticmethod
     def is_valid_domain(domain):
         """域名检测"""
-        pattern = re.compile(r'^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z]{2,})+$')
+        pattern = re.compile(
+            r'^(?!-)[A-Za-z0-9-\u0080-\uffff]{1,63}(?<!-)(\.[A-Za-z\u0080-\uffff]{2,})+$',
+            re.UNICODE
+        )
         return bool(pattern.match(domain))
 
     @staticmethod
@@ -3226,7 +3229,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             record_type = type_combo.currentText()
-            target = enter_inspector.remove_http_https()
+            target = enter_inspector.remove_http_https(target_input.text().strip())
 
             if record_type == "A":
                 if enter_inspector.is_valid_domain(target):
@@ -3240,7 +3243,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                             ip = socket.gethostbyname(target)
                             if enter_inspector.is_valid_ipv4(ip):
                                 target = ip
-                            elif enter_inspector.is_valid_ipv6():
+                            elif enter_inspector.is_valid_ipv6(ip):
                                 ipv6_reply = QMessageBox.question(self, "IPv6 检测",
                                                                   "解析结果是 IPv6 地址。是否要切换到 AAAA 记录？",
                                                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -3263,7 +3266,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     else:
                         # 用户选择使用 CNAME
                         record_type = "CNAME"
-                elif enter_inspector.is_valid_ipv6():
+                elif enter_inspector.is_valid_ipv6(target):
                     reply = QMessageBox.question(self, "IPv6地址检测",
                                                  "检测到IPv6地址。是否要切换到AAAA记录？",
                                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -3295,7 +3298,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                         # 用户选择解析为 IPv6
                         try:
                             ip = socket.getaddrinfo(target, None, socket.AF_INET6)[0][4][0]
-                            if enter_inspector.is_valid_ipv6():
+                            if enter_inspector.is_valid_ipv6(ip):
                                 target = ip
                             elif enter_inspector.is_valid_ipv4(ip):
                                 ipv4_reply = QMessageBox.question(self, "IPv4 检测",
@@ -3320,7 +3323,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     else:
                         # 用户选择使用 CNAME
                         record_type = "CNAME"
-                elif not enter_inspector.is_valid_ipv6():
+                elif not enter_inspector.is_valid_ipv6(target):
                     QMessageBox.warning(self, "无效 IP", "请输入有效的 IPv6 地址")
                     return
 
@@ -3334,7 +3337,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     else:
                         QMessageBox.warning(self, "无效 CNAME", "CNAME 记录不能指向 IP 地址")
                         return
-                elif enter_inspector.is_valid_ipv6():
+                elif enter_inspector.is_valid_ipv6(target):
                     reply = QMessageBox.question(self, "IPv6 地址检测",
                                                  "检测到 IPv6 地址。是否要切换到 AAAA 记录？",
                                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -3365,8 +3368,8 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     srv_target = srv_target.strip('[]')
 
                 if enter_inspector.is_valid_domain(srv_target):
-                    srv_target = enter_inspector.remove_http_https()
-                elif not (enter_inspector.is_valid_ipv4(srv_target) or enter_inspector.is_valid_ipv6()):
+                    srv_target = enter_inspector.remove_http_https(srv_target)
+                elif not (enter_inspector.is_valid_ipv4(srv_target) or enter_inspector.is_valid_ipv6(srv_target)):
                     QMessageBox.warning(self, "无效SRV目标", "SRV目标必须是有效的域名或IP地址")
                     return
 
@@ -3433,7 +3436,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             domain_label = QLabel(domain_info['domain'])
             record_label = QLabel(domain_info['record'])
             type_label = QLabel(domain_info['type'])
-            remarks = QLineEdit(domain_info['remarks'])
 
             # 可编辑字段
             target_input = QLineEdit(domain_info['target'])
@@ -3447,7 +3449,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             layout.addRow("类型:", type_label)
             layout.addRow("目标:", target_input)
             layout.addRow("TTL:", ttl_combo)
-            layout.addRow("备注:", remarks)
 
             ttl_note = QLabel("注意：较慢的TTL可以提升解析稳定度，但会延长更新生效时间。")
             ttl_note.setWordWrap(True)
@@ -3460,7 +3461,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             port_input = QLineEdit()
 
             if domain_info['type'] == "SRV":
-                priority, weight, port, srv_target = enter_inspector.parse_srv_target()
+                priority, weight, port, srv_target = enter_inspector.parse_srv_target(domain_info['target'])
                 priority_input.setText(priority or "")
                 weight_input.setText(weight or "")
                 port_input.setText(port or "")
@@ -3479,17 +3480,17 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 record_type = domain_info['type']
-                target = enter_inspector.remove_http_https()
+                target = enter_inspector.remove_http_https(target_input.text().strip())
 
                 # 验证输入
                 if record_type == "A" and not enter_inspector.is_valid_ipv4(target):
                     QMessageBox.warning(self, "无效IP", "请输入有效的IPv4地址")
                     return
-                elif record_type == "AAAA" and not enter_inspector.is_valid_ipv6():
+                elif record_type == "AAAA" and not enter_inspector.is_valid_ipv6(target):
                     QMessageBox.warning(self, "无效IP", "请输入有效的IPv6地址")
                     return
                 elif record_type == "CNAME":
-                    if enter_inspector.is_valid_ipv4(target) or enter_inspector.is_valid_ipv6():
+                    if enter_inspector.is_valid_ipv4(target) or enter_inspector.is_valid_ipv6(target):
                         QMessageBox.warning(self, "无效CNAME", "CNAME记录不能指向IP地址")
                         return
                     elif not enter_inspector.is_valid_domain(target):
@@ -3506,7 +3507,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                         srv_target = f"[{srv_target}]"
 
                     if not enter_inspector.is_valid_domain(srv_target) and not enter_inspector.is_valid_ipv4(srv_target) and not enter_inspector.is_valid_ipv6(
-                    ):
+                    srv_target.strip('[]')):
                         QMessageBox.warning(self, "无效SRV目标", "SRV目标必须是有效的域名或IP地址")
                         return
 
