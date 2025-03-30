@@ -27,8 +27,7 @@ jobs:
           pip install nuitka
           pip install upx
           pip install -r requirements.txt
-
-
+          
       - name: Install UPX
         run: |
           choco install upx -y
@@ -47,18 +46,13 @@ jobs:
           --upx-binary=$UPX_PATH `
           --include-package-data=PyQt6 `
           --include-qt-plugins=styles,platforms,qml `
-          --plugin-enable=pyqt6,upx `
-          --follow-import-to=PyQt6,PyQt6.QtCore,PyQt6.QtGui,PyQt6.QtWidgets `
+          --plugin-enable=pyqt6,upx,win32 `
+          --follow-import-to=PyQt6,PyQt6.QtCore,PyQt6.QtGui,PyQt6.QtWidgets,psutil,pyperclip,ipaddress,requests,win32api,win32con,win32security,ctypes,dns `
           --remove-output `
-          --include-package=requests `
           --windows-console-mode=disable `
-          --include-package=psutil `
-          --include-package=pyperclip `
-          --include-package=ipaddress `
           --assume-yes-for-downloads `
           --output-dir=./build_output `
-          --nofollow-import-to=psutil.tests.test_testutils `
-          --nofollow-import-to=psutil.tests `
+          --nofollow-import-to=psutil.tests,psutil.tests.test_testutils,dns.tests `
           --windows-icon-from-ico=./favicon.ico `
           --jobs=4 `
           ./CHMLFRP_UI.py
