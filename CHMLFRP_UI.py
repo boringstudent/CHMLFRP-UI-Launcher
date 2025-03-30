@@ -15,6 +15,7 @@ import winreg
 import zipfile
 from datetime import datetime
 from logging.handlers import *
+import glob
 
 import psutil
 import pyperclip
@@ -23,12 +24,15 @@ import win32api
 import win32con
 import win32security
 import ctypes
+import markdown
 import tempfile
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
 from PyQt6.QtWidgets import *
+from PyQt6.QtNetwork import *
 from dns.resolver import Resolver, NoNameservers, NXDOMAIN, NoAnswer, Timeout
-
+import urllib3
+urllib3.disable_warnings()
 
 # ------------------------------以下为程序信息--------------------
 # 程序信息
@@ -40,6 +44,30 @@ Number_of_tunnels = 0 # 隧道数量
 PSEXEC_PATH = "PsExec.exe" if os.path.exists("PsExec.exe") else "PsExec"
 PSTOOLS_URL = "https://download.sysinternals.com/files/PSTools.zip"
 PSEXEC_EXE = "PsExec.exe"
+
+# 更新全局配置
+
+DNS_CONFIG = {
+    "servers": [
+        "1.1.1.1",  # Cloudflare
+        "8.8.8.8",  # Google
+        "114.114.114.114",  # 114DNS
+        "223.5.5.5",  # AliDNS
+        "9.9.9.9"  # Quad9
+    ],
+    "timeout": 5,
+    "domain": "api.github.com"
+}
+MIRROR_PREFIXES = [
+
+    "github.tbedu.top", #3mb
+    "gitproxy.click", #2-3mb
+    "github.moeyy.xyz", #5mb
+    "ghproxy.net", #4mb
+    "gh.llkk.cc", #3mb
+
+]
+DOWNLOAD_TIMEOUT = 10
 
 def get_absolute_path(relative_path):
     """获取相对于程序目录的绝对路径"""
@@ -102,6 +130,68 @@ file_handler.setFormatter(formatter)
 console_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
+
+class ProgramUpdates:
+    @classmethod
+    def check_update(cls, current_version):
+        """检测更新，返回最新版本、更新内容和所有镜像下载链接"""
+        try:
+            # 1. DNS解析和IP测试
+            resolver = Resolver()
+            resolver.nameservers = DNS_CONFIG["servers"]
+            resolver.lifetime = DNS_CONFIG["timeout"]
+
+            try:
+                ips = [str(r) for r in resolver.resolve(DNS_CONFIG["domain"], 'A')]
+            except (NoNameservers, NXDOMAIN, NoAnswer, Timeout):
+                print("DNS解析失败，使用域名直连")
+                endpoint = DNS_CONFIG["domain"]
+            else:
+                endpoint = DNS_CONFIG["domain"]  # 默认回退域名
+                for ip in ips:
+                    try:
+                        sock = socket.create_connection((ip, 443), timeout=5)
+                        sock.close()
+                        endpoint = ip
+                        break
+                    except:
+                        continue
+
+            # 2. 构建请求
+            headers = {"Host": DNS_CONFIG["domain"]} if re.match(r"\d+\.\d+\.\d+\.\d+", endpoint) else {}
+            url = f"https://{endpoint}/repos/boringstudents/CHMLFRP-UI-Launcher/releases/latest"
+
+            # 3. 获取版本信息
+            response = requests.get(url, headers=headers, timeout=DNS_CONFIG["timeout"], verify=False)
+            response.raise_for_status()
+            release_data = response.json()
+            latest_version = release_data["tag_name"]
+            update_content = release_data.get("body", "无更新内容")
+            download_links = []
+
+            # 4. 版本比较
+            current = tuple(map(int, re.sub(r"[^0-9.]", "", current_version).split(".")))
+            latest = tuple(map(int, re.sub(r"[^0-9.]", "", latest_version).split(".")))
+
+            if latest < current:
+                # 本地版本比远程版本新（可能是开发版）
+                return current_version, "当前版本比最新发布版本新", []
+            elif latest == current:
+                # 已经是最新版本
+                return current_version, "当前已是最新版本", []
+
+            # 5. 获取所有镜像下载链接
+            for asset in release_data.get("assets", []):
+                original_url = asset.get("browser_download_url", "")
+                if not original_url: continue
+                urls = [f"https://{prefix}/{original_url}" for prefix in MIRROR_PREFIXES] + [original_url]
+                download_links.extend(urls)
+
+            return latest_version, update_content, download_links
+
+        except Exception as e:
+            print(f"更新检测异常: {str(e)}")
+            return None, None, None
 
 class Pre_run_operations():
     def __init__(self):
@@ -193,11 +283,12 @@ class Pre_run_operations():
         """测试是否有注册表写入权限（示例：尝试写入 HKLM）"""
         try:
             key = win32api.RegCreateKey(
-                win32con.HKEY_LOCAL_MACHINE,
+                win32con.HKEY_CURRENT_USER,
                 "SOFTWARE\\TestKey"
             )
+
             win32api.RegCloseKey(key)
-            win32api.RegDeleteKey(win32con.HKEY_LOCAL_MACHINE, "SOFTWARE\\TestKey")
+            win32api.RegDeleteKey(win32con.HKEY_CURRENT_USER, "SOFTWARE\\TestKey")
             return True
         except Exception as e:
             print(f"注册表访问失败: {e}")
@@ -260,7 +351,7 @@ class Pre_run_operations():
                     credentials = json.load(f)
 
                 # 尝试写入注册表
-                key = winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\ChmlFrp")
+                key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\ChmlFrp")
                 winreg.SetValueEx(key, "username", 0, winreg.REG_SZ, credentials.get('username', ''))
                 winreg.SetValueEx(key, "password", 0, winreg.REG_SZ, credentials.get('password', ''))
                 winreg.SetValueEx(key, "token", 0, winreg.REG_SZ, credentials.get('token', ''))
@@ -1334,6 +1425,534 @@ class SettingsDialog(QDialog):
         except Exception as content:
             QMessageBox.warning(self, "错误", f"保存设置失败: {str(content)}")
 
+class UpdateCheckerDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.download_links = []
+        self.network_manager = QNetworkAccessManager()
+        self.setWindowTitle("软件更新")
+        self.setFixedSize(600, 500)
+
+        # 添加定时器用于检查本地更新
+        self.local_update_timer = QTimer(self)
+        self.local_update_timer.timeout.connect(self.check_local_updates)
+        self.local_update_timer.start(1000)  # 每秒检查一次
+
+        if os.path.exists("favicon.ico"):
+            self.setWindowIcon(QIcon("favicon.ico"))
+
+        self.init_ui()
+        QTimer.singleShot(0, self.check_for_updates)
+        self.check_local_updates()  # 初始检查
+
+
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(15)
+
+        # 版本信息区域
+        version_layout = QFormLayout()
+        self.current_version_label = QLabel(APP_VERSION)
+        self.latest_version_label = QLabel("检查中...")
+        version_layout.addRow("当前版本:", self.current_version_label)
+        version_layout.addRow("最新版本:", self.latest_version_label)
+        layout.addLayout(version_layout)
+
+        # 检查更新按钮
+        self.check_button = QPushButton("重新检查")
+        self.check_button.setStyleSheet("""
+            QPushButton {
+                border-radius: 8px; 
+                padding: 8px;
+                min-width: 100px;
+                background-color: #4CAF50;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.check_button.clicked.connect(self.check_for_updates)
+        layout.addWidget(self.check_button)
+
+        # 更新内容区域
+        self.update_content = QTextBrowser()
+        self.update_content.setOpenLinks(False)
+        self.update_content.setPlaceholderText("更新内容将显示在这里...")
+        self.update_content.setStyleSheet("""
+            QTextBrowser {
+                border-radius: 5px;
+                padding: 10px;
+            }
+        """)
+        layout.addWidget(self.update_content)
+
+        # 下载区域
+        download_group = QGroupBox("下载更新")
+        download_layout = QVBoxLayout(download_group)
+
+        # 镜像选择
+        self.mirror_combo = QComboBox()
+        self.mirror_combo.addItem("请选择下载源...")
+        self.mirror_combo.setStyleSheet("""
+            QComboBox {
+                border-radius: 5px;
+                padding: 5px;
+            }
+        """)
+        download_layout.addWidget(self.mirror_combo)
+
+        # 进度条
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border-radius: 8px;
+                height: 20px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                border-radius: 8px;
+                background-color: #4CAF50;
+            }
+        """)
+        download_layout.addWidget(self.progress_bar)
+
+        # 下载/更新按钮
+        self.download_button = QPushButton("开始下载")
+        self.download_button.setStyleSheet("""
+            QPushButton {
+                border-radius: 8px; 
+                padding: 8px;
+                min-width: 100px;
+                background-color: #2196F3;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #0b7dda;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.download_button.setEnabled(False)
+        self.download_button.clicked.connect(self.start_download_or_update)
+        download_layout.addWidget(self.download_button)
+
+        layout.addWidget(download_group)
+
+        # 底部按钮 (圆角样式)
+        button_box = QDialogButtonBox()
+        button_box.setStyleSheet("""
+            QPushButton {
+                border-radius: 8px;
+                padding: 5px 10px;
+                min-width: 80px;
+            }
+        """)
+
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(self.close)
+        button_box.addButton(close_button, QDialogButtonBox.ButtonRole.RejectRole)
+
+        layout.addWidget(button_box)
+
+    def check_local_updates(self):
+        """检查本地是否有可用的更新包"""
+        local_updates = glob.glob("CUL*.zip")
+        if local_updates:
+            # 找到版本号最大的文件
+            latest_file = max(local_updates, key=lambda x: [
+                int(num) for num in re.findall(r'CUL(\d+)\.(\d+)\.(\d+)\.zip', x)[0]
+            ])
+            version = re.search(r'CUL(\d+\.\d+\.\d+)\.zip', latest_file).group(1)
+
+            # 检查是否是新版本
+            current = tuple(map(int, APP_VERSION.split('.')))
+            latest = tuple(map(int, version.split('.')))
+
+            if latest > current:
+                self.latest_version_label.setText(version)
+                self.update_content.setPlainText(f"检测到本地更新包: {latest_file}\n版本: {version}")
+                self.download_button.setText("开始更新")
+                self.download_button.setEnabled(True)
+                self.download_button.setStyleSheet("""
+                    QPushButton {
+                        border-radius: 8px; 
+                        padding: 8px;
+                        min-width: 100px;
+                        background-color: #FF9800;
+                        color: white;
+                    }
+                    QPushButton:hover {
+                        background-color: #F57C00;
+                    }
+                """)
+                return True
+        return False
+
+    def start_download_or_update(self):
+        """根据情况开始下载或更新"""
+        if self.download_button.text() == "开始下载":
+            self.start_download()
+        else:
+            self.start_update()
+
+    def start_update(self):
+        """执行更新流程"""
+        reply = QMessageBox.question(
+            self, "确认更新",
+            "即将关闭程序并执行更新，是否继续?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.No:
+            return
+
+        # 查找最新的更新包（格式为CUL1.x.x.zip）
+        local_updates = glob.glob("CUL1.*.zip")
+        if not local_updates:
+            QMessageBox.warning(self, "更新失败", "未找到更新包")
+            return
+
+        # 按版本号排序找到最新包
+        latest_file = max(local_updates, key=lambda x: [
+            int(num) for num in re.findall(r'CUL1\.(\d+)\.(\d+)\.zip', x)[0]
+        ])
+
+        # 创建带进度提示的批处理脚本
+        bat_content = f"""
+        @echo off
+        chcp 65001 >nul
+        echo 正在准备更新环境...
+        echo.
+
+        :: 关闭当前目录所有exe进程（含进度提示）
+        echo [1/5] 正在关闭运行中的程序...
+        for %%i in ("%cd%\\*.exe") do (
+            taskkill /f /im "%%~nxi" >nul 2>&1
+            if errorlevel 1 (
+                echo 未找到进程：%%~nxi
+            ) else (
+                echo 已终止进程：%%~nxi
+            )
+        )
+
+        :: 带倒计时的等待
+        echo.
+        echo [2/5] 等待进程清理（剩余2秒）...
+        timeout /t 2 /nobreak
+
+        :: 解压更新包
+        echo.
+        echo [3/5] 正在解压更新包：{os.path.basename(latest_file)}
+        mkdir temp_update 2>nul
+        powershell -command "Expand-Archive -Path '{os.path.abspath(latest_file)}' -DestinationPath 'temp_update' -Force"
+
+        :: 复制文件
+        echo.
+        echo [4/5] 正在应用更新...
+        xcopy /s /y /i "temp_update\\CHMLFRP_UI.dist\\*" "." >nul
+        echo 文件更新完成！
+
+        :: 清理环境
+        echo.
+        echo [5/5] 正在清理临时文件...
+        rd /s /q temp_update
+        del "{os.path.abspath(latest_file)}" >nul 2>&1
+
+        :: 重启程序
+        echo.
+        echo 正在启动新版本...
+        start "" "CHMLFRP_UI.exe"
+
+        :: 自删除脚本（带延迟确保执行完成）
+        ping 127.0.0.1 -n 3 >nul
+        del "%~f0"
+
+        echo.
+        echo 更新已完成！窗口将在3秒后自动关闭...
+        timeout /t 3 /nobreak >nul
+        """
+
+        # 写入批处理文件（使用UTF-8编码支持更丰富的字符）
+        with open("update.bat", "w", encoding="utf-8") as f:
+            f.write(bat_content)
+
+        # 启动独立进程执行更新（显示控制台窗口）
+        subprocess.Popen(
+            ["cmd.exe", "/c", "start", "update.bat"],
+            creationflags=subprocess.CREATE_NEW_CONSOLE
+        )
+        time.sleep(1)
+        # 关闭当前程序
+        self.cleanup()
+
+    def cleanup(self):
+        # 终止所有子进程
+        current_pid = os.getpid()
+        try:
+            current_process = psutil.Process(current_pid)
+            children = current_process.children(recursive=True)
+            for child in children:
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+
+            gone, alive = psutil.wait_procs(children, timeout=5)
+            for p in alive:
+                try:
+                    p.kill()
+                except psutil.NoSuchProcess:
+                    pass
+
+            # 强制终止残留进程
+            subprocess.run(["taskkill", "/f", "/im", "frpc.exe"],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+
+        except Exception as e:
+            logger.error(f"清理进程时出错: {str(e)}")
+
+        QApplication.quit()
+    def apply_theme(self, is_dark):
+        """应用主题设置"""
+        if is_dark:
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #2d2d2d;
+                    color: #ffffff;
+                }
+                QGroupBox {
+                    border: 1px solid #444;
+                    margin-top: 10px;
+                    padding-top: 15px;
+                    color: #ffffff;
+                }
+                QTextBrowser {
+                    background-color: #252525;
+                    border: 1px solid #444;
+                    color: #ffffff;
+                }
+                QComboBox {
+                    background-color: #3a3a3a;
+                    color: white;
+                    border: 1px solid #444;
+                }
+                QLabel {
+                    color: #ffffff;
+                }
+                QDialogButtonBox QPushButton {
+                    border-radius: 8px;
+                    padding: 5px 10px;
+                    min-width: 80px;
+                    background-color: #3a3a3a;
+                    color: white;
+                }
+                QDialogButtonBox QPushButton:hover {
+                    background-color: #4a4a4a;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #ffffff;
+                    color: #000000;
+                }
+                QGroupBox {
+                    border: 1px solid #ddd;
+                    margin-top: 10px;
+                    padding-top: 15px;
+                    color: #000000;
+                }
+                QTextBrowser {
+                    background-color: #f9f9f9;
+                    border: 1px solid #ddd;
+                    color: #000000;
+                }
+                QComboBox {
+                    background-color: #ffffff;
+                    color: #000000;
+                    border: 1px solid #ccc;
+                }
+                QLabel {
+                    color: #000000;
+                }
+                QDialogButtonBox QPushButton {
+                    border-radius: 8px;
+                    padding: 5px 10px;
+                    min-width: 80px;
+                    background-color: #f0f0f0;
+                    color: #000000;
+                }
+                QDialogButtonBox QPushButton:hover {
+                    background-color: #e0e0e0;
+                }
+            """)
+
+    def check_for_updates(self):
+        """执行更新检查"""
+        self.check_button.setEnabled(False)
+        self.latest_version_label.setText("检查中...")
+        self.update_content.setPlainText("正在连接服务器检查更新...")
+        self.mirror_combo.clear()
+        self.mirror_combo.addItem("请选择下载源...")
+        self.download_button.setEnabled(False)
+        self.progress_bar.setValue(0)
+
+        self.thread = QThread()
+        self.worker = UpdateCheckerWorker()
+        self.worker.moveToThread(self.thread)
+
+        self.worker.finished.connect(self.handle_update_result)
+        self.worker.error.connect(self.handle_update_error)
+        self.thread.started.connect(self.worker.run)
+        self.thread.finished.connect(self.thread.deleteLater)
+
+        self.thread.start()
+
+    def handle_update_result(self, latest_version, update_content, download_links):
+        """处理更新检查结果"""
+        self.thread.quit()
+        self.thread.wait()
+
+        self.check_button.setEnabled(True)
+        self.latest_version_label.setText(latest_version)
+
+        # 渲染Markdown内容并保留换行
+        html = markdown.markdown(update_content or "无更新说明", extensions=['nl2br'])
+        self.update_content.setHtml(html)
+
+        self.download_links = download_links
+
+        if latest_version == APP_VERSION:
+            QMessageBox.information(self, "检查更新", "当前已是最新版本！")
+            return
+
+        if not download_links:
+            self.mirror_combo.addItem("无可用下载链接")
+            return
+
+        # 添加所有镜像链接（只显示主域名）
+        for link in download_links:
+            domain = QUrl(link).host()
+            self.mirror_combo.addItem(domain, link)
+
+        self.mirror_combo.currentIndexChanged.connect(self.enable_download_button)
+
+        # 版本比较
+        current = tuple(map(int, re.sub(r"[^0-9.]", "", APP_VERSION).split(".")))
+        latest = tuple(map(int, re.sub(r"[^0-9.]", "", latest_version).split(".")))
+
+        if latest > current:
+            QMessageBox.information(self, "发现新版本",
+                                    f"发现新版本 {latest_version}，请下载更新！")
+
+    def handle_update_error(self, error_msg):
+        """处理更新检查错误"""
+        self.thread.quit()
+        self.thread.wait()
+
+        self.check_button.setEnabled(True)
+        self.latest_version_label.setText("检查失败")
+        self.update_content.setPlainText(f"检查更新时出错:\n{error_msg}")
+        self.mirror_combo.addItem("无法获取下载链接")
+
+        QMessageBox.warning(self, "检查更新失败", error_msg)
+
+    def enable_download_button(self, index):
+        """启用下载按钮"""
+        self.download_button.setEnabled(index > 0)
+
+    def start_download(self):
+        """开始下载更新"""
+        index = self.mirror_combo.currentIndex()
+        if index <= 0:
+            return
+
+        url = self.mirror_combo.itemData(index)
+        version = self.latest_version_label.text()
+        filename = f"CUL{version}.zip"
+        save_path = os.path.join(os.getcwd(), filename)
+
+        # 检查文件是否已存在
+        if os.path.exists(save_path):
+            reply = QMessageBox.question(
+                self, "文件已存在",
+                f"文件 {filename} 已存在，是否覆盖?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        self.download_button.setEnabled(False)
+        self.check_button.setEnabled(False)
+        self.progress_bar.setFormat("准备下载...")
+
+        request = QNetworkRequest(QUrl(url))
+        self.reply = self.network_manager.get(request)
+        self.reply.downloadProgress.connect(self.update_progress)
+        self.reply.finished.connect(lambda: self.download_finished(save_path))
+
+    def update_progress(self, bytes_received, bytes_total):
+        """更新下载进度"""
+        if bytes_total > 0:
+            progress = int((bytes_received / bytes_total) * 100)
+            self.progress_bar.setValue(progress)
+            self.progress_bar.setFormat(
+                f"下载中... {progress}% ({bytes_received / 1024 / 1024:.1f}MB/{bytes_total / 1024 / 1024:.1f}MB)")
+
+    def download_finished(self, save_path):
+        """下载完成处理"""
+        try:
+            # PyQt6中错误检查方式
+            if self.reply.error() == QNetworkReply.NetworkError.NoError:
+                with open(save_path, 'wb') as f:
+                    f.write(self.reply.readAll())
+                self.progress_bar.setFormat("下载完成！")
+                QMessageBox.information(self, "下载完成", f"文件已保存为:\n{save_path}")
+            else:
+                self.progress_bar.setFormat("下载失败")
+                QMessageBox.warning(self, "下载失败", self.reply.errorString())
+        except Exception as e:
+            self.progress_bar.setFormat("保存失败")
+            QMessageBox.warning(self, "保存失败", f"文件保存失败: {str(e)}")
+        finally:
+            self.download_button.setEnabled(True)
+            self.check_button.setEnabled(True)
+            if hasattr(self, 'reply'):
+                self.reply.deleteLater()
+
+class UpdateCheckerWorker(QObject):
+    """更新检查工作线程"""
+    finished = pyqtSignal(str, str, list)
+    error = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+
+    def run(self):
+        try:
+            latest_version, update_content, download_links = ProgramUpdates.check_update(APP_VERSION)
+            if latest_version is None:
+                self.error.emit("无法获取更新信息")
+                return
+
+            if latest_version == APP_VERSION:
+                self.finished.emit(latest_version, update_content, [])
+            elif download_links:
+                self.finished.emit(latest_version, update_content or "无更新说明", download_links or [])
+            else:
+                self.error.emit("未找到更新信息")
+        except Exception as e:
+            self.error.emit(f"更新检查失败: {str(e)}")
+
 class NodeCard(QFrame):
     clicked = pyqtSignal(object)
     def __init__(self, node_info):
@@ -1405,7 +2024,6 @@ class NodeCard(QFrame):
 
 class MainWindow(QMainWindow):
     """主窗口"""
-
     def __init__(self):
         super().__init__()
         self.stop_worker = None
@@ -1541,6 +2159,10 @@ class MainWindow(QMainWindow):
         self.settings_button.clicked.connect(self.show_settings)
         title_layout.addWidget(self.settings_button)
 
+        self.settings_button = QPushButton("检测更新")
+        self.settings_button.clicked.connect(self.show_update)
+        title_layout.addWidget(self.settings_button)
+
         min_button = QPushButton("－")
         min_button.clicked.connect(self.showMinimized)
         close_button = QPushButton("×")
@@ -1669,6 +2291,11 @@ class MainWindow(QMainWindow):
 
     def show_settings(self):
         dialog = SettingsDialog(self)
+        dialog.apply_theme(self.dark_theme)
+        dialog.exec()
+
+    def show_update(self):
+        dialog = UpdateCheckerDialog()
         dialog.apply_theme(self.dark_theme)
         dialog.exec()
 
@@ -2392,7 +3019,7 @@ class MainWindow(QMainWindow):
     def load_credentials(self):
         """从注册表加载凭证"""
         try:
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\ChmlFrp", 0, winreg.KEY_READ)
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\ChmlFrp", 0, winreg.KEY_READ)
             username = winreg.QueryValueEx(key, "username")[0]
             password = winreg.QueryValueEx(key, "password")[0]
             token = winreg.QueryValueEx(key, "token")[0]
@@ -2412,8 +3039,8 @@ class MainWindow(QMainWindow):
     def save_credentials(self):
         """保存凭证到注册表"""
         try:
-            # 需要管理员权限写入HKEY_LOCAL_MACHINE
-            key = winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\ChmlFrp")
+            # 需要管理员权限写入HKEY_CURRENT_USER
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\ChmlFrp")
             winreg.SetValueEx(key, "username", 0, winreg.REG_SZ, self.username_input.text())
             winreg.SetValueEx(key, "password", 0, winreg.REG_SZ, self.password_input.text())
             winreg.SetValueEx(key, "token", 0, winreg.REG_SZ, self.token_input.text())
@@ -2525,7 +3152,7 @@ class MainWindow(QMainWindow):
         # 删除注册表项中的凭证
         try:
             # 需要管理员权限删除注册表项
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\ChmlFrp", 0, winreg.KEY_WRITE)
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\ChmlFrp", 0, winreg.KEY_WRITE)
             try:
                 winreg.DeleteValue(key, "username")
             except WindowsError:
@@ -3895,6 +4522,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             else:
                 self.logger.warning(f"尝试停止不存在的隧道: {tunnel_name}")
 
+
 if __name__ == '__main__':
     def exception_hook(exctype, value, main_thread):
         while main_thread:
@@ -3902,10 +4530,9 @@ if __name__ == '__main__':
         sys.__excepthook__(exctype, value, main_thread)
 
     sys.excepthook = exception_hook
-    Pre_run_operations.elevation_rights() #提权
-    Pre_run_operations.document_checking() #配置文件检查
-
     try:
+        Pre_run_operations.elevation_rights()  # 提权
+        Pre_run_operations.document_checking()  # 配置文件检查
         app = QApplication(sys.argv)
         main_window = MainWindow()
         main_window.show()
