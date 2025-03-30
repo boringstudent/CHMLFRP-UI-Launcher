@@ -49,7 +49,6 @@ jobs:
           --plugin-enable=pyqt6,upx `
           --follow-import-to=PyQt6,PyQt6.QtCore,PyQt6.QtGui,PyQt6.QtWidgets,psutil,pyperclip,ipaddress,requests,win32api,win32con,win32security,ctypes,dns `
           --remove-output `
-          --windows-console-mode=disable `
           --assume-yes-for-downloads `
           --output-dir=./build_output `
           --nofollow-import-to=psutil.tests,psutil.tests.test_testutils,dns.tests `
