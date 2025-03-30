@@ -175,7 +175,7 @@ class ProgramUpdates:
 
             if latest < current:
                 # 本地版本比远程版本新（可能是开发版）
-                return current_version, "当前版本比最新发布版本新", []
+                return current_version, "当前版本比最新发布版本", []
             elif latest == current:
                 # 已经是最新版本
                 return current_version, "当前已是最新版本", []
