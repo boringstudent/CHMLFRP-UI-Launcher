@@ -100,16 +100,23 @@ class Pre_run_operations():
 
     @classmethod
     def elevation_rights(cls):
-        """提权"""
+        """提升为DEBUG权限"""
         try:
-            current_process = win32api.GetCurrentProcess()
-            token = win32security.OpenProcessToken(current_process,
-                                                   win32con.TOKEN_ADJUST_PRIVILEGES | win32con.TOKEN_QUERY)
-            privilege_id = win32security.LookupPrivilegeValue(None, win32con.SE_DEBUG_NAME)
-            new_privileges = [(privilege_id, win32con.SE_PRIVILEGE_ENABLED)]
-            win32security.AdjustTokenPrivileges(token, False, new_privileges)
+            # 获取当前进程令牌
+            token = win32security.OpenProcessToken(
+                win32api.GetCurrentProcess(),
+                win32security.TOKEN_ADJUST_PRIVILEGES | win32security.TOKEN_QUERY
+            )
+
+            # 启用SE_DEBUG_NAME权限
+            privilege = win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME)
+            win32security.AdjustTokenPrivileges(
+                token,
+                False,
+                [(privilege, win32security.SE_PRIVILEGE_ENABLED)]
+            )
         except Exception as e:
-            print(f"提升权限时出错: {e}")
+            logger.error(f"提权失败: {e}")
 
     @classmethod
     def document_checking(cls):
@@ -128,12 +135,30 @@ class Pre_run_operations():
             with open(settings_path, 'w', encoding='utf-8') as f:
                 json.dump(default_settings, f, indent=4, ensure_ascii=False)
 
-        # 检查并创建credentials.json
-        is_empty, _ = check_file_empty("credentials.json")
-        if is_empty:
-            credentials_path = get_absolute_path("credentials.json")
-            with open(credentials_path, 'w', encoding='utf-8') as f:
-                json.dump({}, f, indent=4, ensure_ascii=False)
+    @classmethod
+    def document_checking(cls):
+        """文档检查与数据迁移"""
+        # 迁移旧的凭证文件到注册表
+        credentials_path = get_absolute_path("credentials.json")
+        if os.path.exists(credentials_path):
+            try:
+                with open(credentials_path, 'r') as f:
+                    credentials = json.load(f)
+
+                # 尝试写入注册表
+                key = winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\ChmlFrp")
+                winreg.SetValueEx(key, "username", 0, winreg.REG_SZ, credentials.get('username', ''))
+                winreg.SetValueEx(key, "password", 0, winreg.REG_SZ, credentials.get('password', ''))
+                winreg.SetValueEx(key, "token", 0, winreg.REG_SZ, credentials.get('token', ''))
+                winreg.CloseKey(key)
+
+                # 删除旧文件
+                os.remove(credentials_path)
+                logger.info("已迁移旧凭证文件到注册表")
+            except PermissionError:
+                logger.error("迁移凭证需要管理员权限！")
+            except Exception as e:
+                logger.error(f"迁移凭证文件失败: {str(e)}")
 
 class enter_inspector():
     def __init__(self):
@@ -301,7 +326,6 @@ class API():
             logger.exception("用户信息API发生错误")
             logger.exception(content)
             return None
-
 
 class QtHandler(QObject, logging.Handler):
     """Qt日志处理器"""
@@ -2249,31 +2273,40 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def load_credentials(self):
-        """加载保存的凭证"""
-        credentials_path = get_absolute_path('credentials.json')
-        if os.path.exists(credentials_path):
-            try:
-                with open(credentials_path, 'r') as file_contents:
-                    credentials = json.load(file_contents)
-                    self.username_input.setText(credentials.get('username', ''))
-                    self.password_input.setText(credentials.get('password', ''))
-                    self.token_input.setText(credentials.get('token', ''))
-            except Exception as content:
-                self.logger.error(f"加载凭证时发生错误: {str(content)}")
+        """从注册表加载凭证"""
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\ChmlFrp", 0, winreg.KEY_READ)
+            username = winreg.QueryValueEx(key, "username")[0]
+            password = winreg.QueryValueEx(key, "password")[0]
+            token = winreg.QueryValueEx(key, "token")[0]
+            winreg.CloseKey(key)
+            self.username_input.setText(username)
+            self.password_input.setText(password)
+            self.token_input.setText(token)
+        except FileNotFoundError:
+            # 注册表项不存在，忽略
+            pass
+        except PermissionError:
+            self.logger.error("权限不足，无法读取注册表。请以管理员身份运行程序。")
+            QMessageBox.critical(self, "错误", "需要管理员权限读取凭证！")
+        except Exception as e:
+            self.logger.error(f"从注册表加载凭证失败: {str(e)}")
 
     def save_credentials(self):
-        """保存凭证"""
-        credentials = {
-            'username': self.username_input.text(),
-            'password': self.password_input.text(),
-            'token': self.token_input.text()
-        }
-        credentials_path = get_absolute_path('credentials.json')
+        """保存凭证到注册表"""
         try:
-            with open(credentials_path, 'w') as file_contents:
-                json.dump(credentials, file_contents)
-        except Exception as content:
-            self.logger.error(f"保存凭证时发生错误: {str(content)}")
+            # 需要管理员权限写入HKEY_LOCAL_MACHINE
+            key = winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\ChmlFrp")
+            winreg.SetValueEx(key, "username", 0, winreg.REG_SZ, self.username_input.text())
+            winreg.SetValueEx(key, "password", 0, winreg.REG_SZ, self.password_input.text())
+            winreg.SetValueEx(key, "token", 0, winreg.REG_SZ, self.token_input.text())
+            winreg.CloseKey(key)
+        except PermissionError:
+            self.logger.error("权限不足，无法写入注册表。请以管理员身份运行程序。")
+            QMessageBox.critical(self, "错误", "需要管理员权限保存凭证！")
+        except Exception as e:
+            self.logger.error(f"保存凭证到注册表失败: {str(e)}")
+            QMessageBox.warning(self, "错误", f"保存凭证失败: {str(e)}")
 
     def auto_login(self):
         """自动登录"""
@@ -2372,12 +2405,30 @@ class MainWindow(QMainWindow):
         self.password_input.clear()
         self.token_input.clear()
 
-        credentials_path = get_absolute_path('credentials.json')
+        # 删除注册表项中的凭证
         try:
-            with open(credentials_path, 'w') as file_contents:
-                json.dump({}, file_contents)
-        except Exception as content:
-            self.logger.error(f"清空凭证文件时发生错误: {str(content)}")
+            # 需要管理员权限删除注册表项
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\ChmlFrp", 0, winreg.KEY_WRITE)
+            try:
+                winreg.DeleteValue(key, "username")
+            except WindowsError:
+                pass
+            try:
+                winreg.DeleteValue(key, "password")
+            except WindowsError:
+                pass
+            try:
+                winreg.DeleteValue(key, "token")
+            except WindowsError:
+                pass
+            winreg.CloseKey(key)
+        except PermissionError:
+            self.logger.error("权限不足，无法删除注册表项")
+            QMessageBox.critical(self, "错误", "需要管理员权限清除凭证！")
+        except FileNotFoundError:
+            pass  # 如果注册表项不存在则忽略
+        except Exception as e:
+            self.logger.error(f"清除注册表凭证失败: {str(e)}")
 
         self.clear_user_data()
         self.logger.info("已退出登录")
