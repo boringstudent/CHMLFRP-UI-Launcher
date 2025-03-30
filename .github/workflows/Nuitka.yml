@@ -46,7 +46,7 @@ jobs:
           --upx-binary=$UPX_PATH `
           --include-package-data=PyQt6 `
           --include-qt-plugins=styles,platforms,qml `
-          --plugin-enable=pyqt6,upx,win32 `
+          --plugin-enable=pyqt6,upx `
           --follow-import-to=PyQt6,PyQt6.QtCore,PyQt6.QtGui,PyQt6.QtWidgets,psutil,pyperclip,ipaddress,requests,win32api,win32con,win32security,ctypes,dns `
           --remove-output `
           --windows-console-mode=disable `
