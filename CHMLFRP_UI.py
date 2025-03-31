@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import re
+import smtplib
 import socket
 import subprocess
 import sys
@@ -13,7 +14,6 @@ import traceback
 import urllib
 import winreg
 import zipfile
-from datetime import datetime
 from logging.handlers import *
 import glob
 
@@ -32,12 +32,17 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtNetwork import *
 from dns.resolver import Resolver, NoNameservers, NXDOMAIN, NoAnswer, Timeout
 import urllib3
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime
+from typing import Tuple, Optional, Dict
+import html
 urllib3.disable_warnings()
 
 # ------------------------------以下为程序信息--------------------
 # 程序信息
 APP_NAME = "CUL" # 程序名称
-APP_VERSION = "1.5.9" # 程序版本
+APP_VERSION = "1.6.0" # 程序版本
 PY_VERSION = "3.13.2" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
@@ -131,7 +136,144 @@ console_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
-class ProgramUpdates:
+class message_push():
+    CONFIG_MAP = {
+        'qq.com': ('smtp.qq.com', 465),
+        '163.com': ('smtp.163.com', 465),
+        'aliyun.com': ('smtp.aliyun.com', 465),
+        '126.com': ('smtp.126.com', 465),
+        'foxmail.com': ('smtp.exmail.qq.com', 465),
+        'sina.com': ('smtp.sina.com', 465),
+        'sohu.com': ('smtp.sohu.com', 465),
+        'yeah.net': ('smtp.yeah.net', 465),
+        '21cn.com': ('smtp.21cn.com', 465),
+        'vip.qq.com': ('smtp.vip.qq.com', 465),
+        '263.net': ('smtp.263.net', 465),
+        'exmail.qq.com': ('smtp.exmail.qq.com', 465)
+    }
+
+    def __init__(self, sender_email: str, password: str, receiver_email: str,
+                 smtp_server: Optional[str] = None, port: Optional[int] = None):
+        """
+        初始化邮件通知器
+
+        :param sender_email: 发件人邮箱
+        :param password: 邮箱密码/授权码
+        :param receiver_email: 收件人邮箱
+        :param smtp_server: SMTP服务器地址(可选，自动检测)
+        :param port: SMTP端口(可选，自动检测)
+        """
+        self.sender_email = sender_email
+        self.password = password
+        self.receiver_email = receiver_email
+
+        # 自动检测SMTP配置
+        if smtp_server is None or port is None:
+            self.smtp_server, self.port = self.auto_detect_config()
+        else:
+            self.smtp_server = smtp_server
+            self.port = port
+
+    @staticmethod
+    def get_computer_name() -> str:
+        """获取计算机名"""
+        return socket.gethostname()
+
+    @staticmethod
+    def get_current_time(format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
+        """获取当前时间"""
+        return datetime.now().strftime(format_str)
+
+    def auto_detect_config(self) -> Tuple[str, int]:
+        """
+        根据邮箱地址自动检测SMTP配置
+
+        :return: (smtp_server, port)
+        :raises ValueError: 不支持的邮箱服务商
+        """
+        domain = self.sender_email.split('@')[-1].lower()
+
+        for key, value in self.CONFIG_MAP.items():
+            if domain.endswith(key):  # 支持子域名
+                return value
+
+        if domain.endswith('.com') and 'exmail' in domain:
+            return ('smtp.exmail.qq.com', 465)
+
+        raise ValueError(f"不支持的邮箱服务商: {domain}，请手动配置SMTP信息")
+
+    def send(self, subject: str, body: str) -> Tuple[bool, str]:
+        """
+        发送邮件
+
+        :param subject: 邮件主题
+        :param body: 邮件正文
+        :return: (成功标志, 状态信息)
+        """
+        message = MIMEMultipart()
+        message["From"] = self.sender_email
+        message["To"] = self.receiver_email
+        message["Subject"] = subject
+
+        # 使用 html.unescape 替换 HTML 实体
+        clean_body = html.unescape(body)
+        message.attach(MIMEText(clean_body, "plain", "utf-8"))
+
+        try:
+            # 尝试使用端口 465 发送
+            server = smtplib.SMTP_SSL(self.smtp_server, 465, timeout=15)
+            server.login(self.sender_email, self.password)
+            server.sendmail(self.sender_email, self.receiver_email, message.as_string())
+            server.quit()
+            return True, "邮件发送成功"
+        except Exception as e465:
+            # 如果端口 465 发送失败，尝试使用端口 587
+            try:
+                server = smtplib.SMTP(self.smtp_server, 587, timeout=15)
+                server.starttls()
+                server.login(self.sender_email, self.password)
+                server.sendmail(self.sender_email, self.receiver_email, message.as_string())
+                server.quit()
+                return True, "邮件发送成功（使用端口 587）"
+            except smtplib.SMTPAuthenticationError as e:
+                return False, f"认证失败：{str(e)}，请检查邮箱用户名或密码"
+            except smtplib.SMTPConnectError as e:
+                return False, f"连接服务器失败：{str(e)}，请检查网络设置"
+            except smtplib.SMTPException as e:
+                return False, f"SMTP协议错误：{str(e)}"
+            except socket.timeout:
+                return False, "连接超时，请检查网络设置"
+            except Exception as e:
+                return False, f"未知错误：{str(e)}"
+
+        except smtplib.SMTPAuthenticationError as e:
+            return False, f"认证失败：{str(e)}，请检查邮箱用户名或密码"
+        except smtplib.SMTPConnectError as e:
+            return False, f"连接服务器失败：{str(e)}，请检查网络设置"
+        except smtplib.SMTPException as e:
+            return False, f"SMTP协议错误：{str(e)}"
+        except socket.timeout:
+            return False, "连接超时，请检查网络设置"
+        except Exception as e:
+            return False, f"未知错误：{str(e)}"
+
+    def send_notification(self, system_name: str, warning_message: str) -> Tuple[bool, str]:
+        """
+        发送系统通知邮件
+
+        :param system_name: 系统名称
+        :param warning_message: 警告消息
+        :return: (成功标志, 状态信息)
+        """
+        subject = f"{system_name}系统告警"
+        body = (f"来自『{self.get_computer_name()}』的 {system_name} 系统在 "
+                f"{self.get_current_time()} 发出警告：\n\n{warning_message}")
+        return self.send(subject, body)
+
+class ProgramUpdates():
+    def __init__(self):
+        super().__init__()
+
     @classmethod
     def check_update(cls, current_version):
         """检测更新，返回最新版本、更新内容和所有镜像下载链接"""
@@ -978,6 +1120,8 @@ class SettingsDialog(QDialog):
         self.load_settings()
         self.apply_theme(parent.dark_theme)
 
+
+
     def init_ui(self):
         layout = QVBoxLayout(self)
 
@@ -1141,6 +1285,112 @@ class SettingsDialog(QDialog):
         button_layout.addWidget(save_button)
         button_layout.addWidget(cancel_button)
         layout.addLayout(button_layout)
+
+        # === 消息推送标签页 ===
+        notification_tab = QWidget()
+        notification_layout = QVBoxLayout(notification_tab)
+
+        # 邮件服务器配置
+        mail_group = QGroupBox("邮件服务器配置")
+        mail_layout = QFormLayout()
+
+        # 预设邮箱服务选择
+        self.mail_service_combo = QComboBox()
+        self.mail_service_combo.addItem("自定义配置")
+        self.mail_service_combo.addItems(message_push.CONFIG_MAP.keys())
+        self.mail_service_combo.currentIndexChanged.connect(self.update_mail_config)
+
+        # 邮件账号配置
+        self.sender_email_input = QLineEdit()
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.smtp_server_input = QLineEdit()
+        self.smtp_port_input = QLineEdit()
+        self.smtp_port_input.setValidator(QIntValidator(1, 65535))
+
+        # 测试按钮
+        test_button = QPushButton("发送测试邮件")
+        test_button.clicked.connect(self.send_test_email)
+
+        mail_layout.addRow("预设服务:", self.mail_service_combo)
+        mail_layout.addRow("发件邮箱:", self.sender_email_input)
+        mail_layout.addRow("密码/授权码:", self.password_input)
+        mail_layout.addRow("SMTP服务器:", self.smtp_server_input)
+        mail_layout.addRow("SMTP端口:", self.smtp_port_input)
+        mail_layout.addRow(test_button)
+        mail_group.setLayout(mail_layout)
+
+        # 通知选项
+        notify_group = QGroupBox("通知设置")
+        notify_layout = QVBoxLayout()
+
+        self.tunnel_offline_check = QCheckBox("隧道离线通知")
+        self.node_offline_check = QCheckBox("节点离线通知")
+        self.tunnel_start_check = QCheckBox("隧道启动通知")
+        self.node_online_check = QCheckBox("新节点上线通知")
+
+        notify_layout.addWidget(self.tunnel_offline_check)
+        notify_layout.addWidget(self.node_offline_check)
+        notify_layout.addWidget(self.tunnel_start_check)
+        notify_layout.addWidget(self.node_online_check)
+        notify_group.setLayout(notify_layout)
+
+        notification_layout.addWidget(mail_group)
+        notification_layout.addWidget(notify_group)
+        notification_layout.addStretch()
+
+        tab_widget.addTab(notification_tab, "消息推送")
+
+    def update_mail_config(self, index):
+        """当选择预设服务时自动填充配置"""
+        if index == 0:  # 自定义
+            return
+
+        service = self.mail_service_combo.currentText()
+        server, port = message_push.CONFIG_MAP[service]
+        self.smtp_server_input.setText(server)
+        self.smtp_port_input.setText(str(port))
+
+    def send_test_email(self):
+        """发送测试邮件"""
+        config = self.get_mail_config()
+        if not config.get("sender_email") or not config.get("password"):
+            QMessageBox.warning(self, "错误", "请先填写邮箱和密码")
+            return
+
+        try:
+            notifier = message_push(
+                sender_email=config["sender_email"],
+                password=config["password"],
+                receiver_email=config["sender_email"],  # 发件和收件相同
+                smtp_server=config.get("smtp_server"),
+                port=config.get("smtp_port")
+            )
+            success, msg = notifier.send(
+                subject="测试邮件",
+                body=f"这是一封来自{APP_NAME}的测试邮件\n发送时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            if success:
+                QMessageBox.information(self, "成功", "测试邮件发送成功！")
+            else:
+                QMessageBox.warning(self, "失败", f"发送失败：{msg}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"发送测试邮件时发生异常：{str(e)}")
+
+    def get_mail_config(self):
+        """获取邮件配置"""
+        return {
+            "sender_email": self.sender_email_input.text(),
+            "password": self.password_input.text(),
+            "smtp_server": self.smtp_server_input.text(),
+            "smtp_port": self.smtp_port_input.text(),
+            "notifications": {
+                "tunnel_offline": self.tunnel_offline_check.isChecked(),
+                "node_offline": self.node_offline_check.isChecked(),
+                "tunnel_start": self.tunnel_start_check.isChecked(),
+                "node_online": self.node_online_check.isChecked()
+            }
+        }
 
     def apply_theme(self, is_dark):
         if is_dark:
@@ -1342,6 +1592,20 @@ class SettingsDialog(QDialog):
             error_item = QListWidgetItem("加载隧道列表失败")
             self.tunnel_list.addItem(error_item)
 
+        # 加载邮件配置
+        mail_config = settings_content.get('mail', {})
+        self.sender_email_input.setText(mail_config.get('sender_email', ''))
+        self.password_input.setText(mail_config.get('password', ''))
+        self.smtp_server_input.setText(mail_config.get('smtp_server', ''))
+        self.smtp_port_input.setText(str(mail_config.get('smtp_port', 465)))
+
+        # 加载通知设置
+        notify_settings = mail_config.get('notifications', {})
+        self.tunnel_offline_check.setChecked(notify_settings.get('tunnel_offline', False))
+        self.node_offline_check.setChecked(notify_settings.get('node_offline', False))
+        self.tunnel_start_check.setChecked(notify_settings.get('tunnel_start', False))
+        self.node_online_check.setChecked(notify_settings.get('node_online', False))
+
 
     def toggle_autostart(self, state):
         if sys.platform == "win32":
@@ -1397,12 +1661,9 @@ class SettingsDialog(QDialog):
                         auto_start_tunnels.append(item.text())
 
             settings_pathway = get_absolute_path("settings.json")
-            settings_content = {
-                'auto_start_tunnels': auto_start_tunnels,
-                'theme': self.get_selected_theme(),
-                'log_size_mb': log_size,
-                'backup_count': backup_count
-            }
+            settings_content = {'auto_start_tunnels': auto_start_tunnels, 'theme': self.get_selected_theme(),
+                                'log_size_mb': log_size, 'backup_count': backup_count, 'mail': self.get_mail_config()}
+            # 保存邮件配置
 
             with open(settings_pathway, 'w') as file_contents:
                 json.dump(settings_content, file_contents)
@@ -2075,6 +2336,9 @@ class MainWindow(QMainWindow):
         self.selected_tunnels = []
         self.token = None
 
+        self.mail_notifier = None
+        self.load_mail_config()
+
         # 初始化输出互斥锁
         self.output_mutex = QMutex()
 
@@ -2231,6 +2495,46 @@ class MainWindow(QMainWindow):
             self.node_button
         ]
 
+    def load_mail_config(self):
+        """加载邮件配置"""
+        settings_path = get_absolute_path("settings.json")
+        if os.path.exists(settings_path):
+            with open(settings_path, 'r') as f:
+                settings = json.load(f)
+                mail_config = settings.get('mail', {})
+
+                if mail_config.get('sender_email') and mail_config.get('password'):
+                    self.mail_notifier = message_push(
+                        sender_email=mail_config['sender_email'],
+                        password=mail_config['password'],
+                        receiver_email=mail_config['sender_email'],
+                        smtp_server=mail_config.get('smtp_server'),
+                        port=mail_config.get('smtp_port')
+                    )
+                self.notify_settings = mail_config.get('notifications', {})
+
+    def send_notification(self, event_type, message):
+        """发送通知"""
+        if not self.mail_notifier or not self.notify_settings.get(event_type, False):
+            return
+
+        computer_name = message_push.get_computer_name()
+        current_time = message_push.get_current_time()
+
+        subject = f"{APP_NAME}系统通知 - {event_type}"
+        body = f"""
+        事件类型：{event_type}
+        发生时间：{current_time}
+        计算机名称：{computer_name}
+        详细信息：
+        {message}
+        """
+
+        # 在子线程中发送邮件避免阻塞UI
+        threading.Thread(target=self.mail_notifier.send,
+                         args=(subject, body),
+                         daemon=True).start()
+
     def load_app_settings(self):
         """加载应用程序设置"""
         settings_path_json = get_absolute_path("settings.json")
@@ -2329,8 +2633,24 @@ class MainWindow(QMainWindow):
                     self.logger.warning(f"节点 {node_name} 离线，停止隧道 {tunnel_name}")
                     self.stop_tunnel({"name": tunnel_name})
                     QMessageBox.warning(self, "节点离线", f"节点 {node_name} 离线，隧道 {tunnel_name} 已停止")
+
+                if not API.is_node_online(node_name, tyen="online"):
+                    self.send_notification("node_offline",
+                                           f"节点 {node_name} 已离线\n最后在线：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             else:
                 self.logger.warning(f"未找到隧道 {tunnel_name} 的信息")
+
+        # 添加节点上线检测
+        def check_new_nodes(self):
+            previous_nodes = set(n['node_name'] for n in self.last_node_list)
+            current_nodes = set(n['node_name'] for n in API.is_node_online(tyen="all")['data'])
+
+            new_nodes = current_nodes - previous_nodes
+            if new_nodes:
+                for node in new_nodes:
+                    self.send_notification("node_online",
+                                           f"新节点上线：{node}\n上线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                self.last_node_list = API.is_node_online(tyen="all")['data']
 
     def update_button_styles(self, selected_button):
         for button in self.tab_buttons:
@@ -3464,9 +3784,15 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     # 启动状态检查
                     QTimer.singleShot(100, lambda: self.check_tunnel_status(tunnel_info['name']))
 
+
+                    self.send_notification("tunnel_start",
+                                               f"隧道 {tunnel_info['name']} 已成功启动\n节点：{tunnel_info['node']}")
+
+
                 except Exception as e:
                     self.logger.error(f"启动隧道失败: {str(e)}")
                     raise
+
 
         except Exception as e:
             self.logger.error(f"启动隧道时发生错误: {str(e)}")
@@ -3662,7 +3988,38 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             QTimer.singleShot(100, lambda: self.check_tunnel_status(tunnel_name))
         else:
             # 进程已停止
-            self.update_tunnel_card_status(tunnel_name, False)
+            if tunnel_name in self.tunnel_processes:
+                process = self.tunnel_processes[tunnel_name]
+                if process is not None:
+                    exit_code = process.poll()
+                    if exit_code is not None:
+                        self.update_tunnel_card_status(tunnel_name, False)
+                        self.send_notification("tunnel_offline",
+                                               f"隧道 {tunnel_name} 意外停止\n退出代码：{exit_code}\n"
+                                               f"日志：\n"
+                                               f"启动时间: {self.tunnel_outputs[tunnel_name]['output']}\n"
+                                               f"运行次数: {self.tunnel_outputs[tunnel_name]['run_number']}\n"
+                                               f"frpc日志: {self.tunnel_outputs[tunnel_name]['dialog']}\n"
+                                               f"退出代码: {self.tunnel_outputs[tunnel_name]['process']}")
+                else:
+                    self.update_tunnel_card_status(tunnel_name, False)
+                    self.send_notification("tunnel_offline",
+                                           f"隧道 {tunnel_name} 外停止，但无法获取退出代码\n"
+                                           f"日志：\n"
+                                           f"启动时间: {self.tunnel_outputs[tunnel_name]['output']}\n"
+                                           f"运行次数: {self.tunnel_outputs[tunnel_name]['run_number']}\n"
+                                           f"frpc日志: {self.tunnel_outputs[tunnel_name]['dialog']}\n"
+                                           f"process: {self.tunnel_outputs[tunnel_name]['process']}")
+            else:
+                self.update_tunnel_card_status(tunnel_name, False)
+                self.send_notification("tunnel_offline",
+                                       f"隧道 {tunnel_name} 停止\n"
+                                       f"日志：\n"
+                                       f"启动时间: {self.tunnel_outputs[tunnel_name]['output']}\n"
+                                       f"运行次数: {self.tunnel_outputs[tunnel_name]['run_number']}\n"
+                                       f"frpc日志: {self.tunnel_outputs[tunnel_name]['dialog']}\n"
+                                       f"退出代码: {self.tunnel_outputs[tunnel_name]['process']}")
+            # 删除隧道进程记录
             if tunnel_name in self.tunnel_processes:
                 del self.tunnel_processes[tunnel_name]
 
