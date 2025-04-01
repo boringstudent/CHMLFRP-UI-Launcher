@@ -42,7 +42,7 @@ urllib3.disable_warnings()
 # ------------------------------以下为程序信息--------------------
 # 程序信息
 APP_NAME = "CUL" # 程序名称
-APP_VERSION = "1.6.1" # 程序版本
+APP_VERSION = "0.6.1" # 程序版本
 PY_VERSION = "3.13.2" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
@@ -63,15 +63,47 @@ DNS_CONFIG = {
     "timeout": 5,
     "domain": "api.github.com"
 }
-MIRROR_PREFIXES = [
 
-    "github.tbedu.top", #3mb
-    "gitproxy.click", #2-3mb
-    "github.moeyy.xyz", #5mb
-    "ghproxy.net", #4mb
-    "gh.llkk.cc", #3mb
-
+# ------------------------------更新的镜像地址--------------------
+# 默认备用镜像列表
+DEFAULT_MIRRORS = [
+    "github.tbedu.top",  # 3mb
+    "gitproxy.click",  # 2-3mb
+    "github.moeyy.xyz",  # 5mb
+    "ghproxy.net",  # 4mb
+    "gh.llkk.cc",  # 3mb
 ]
+
+# API地址
+API_URL = "https://api.akams.cn/github"
+
+def get_mirrors():
+    try:
+        # 发起请求
+        response = requests.get(API_URL)
+        response.raise_for_status()  # 检查请求是否成功
+        data = response.json()
+
+        # 检查返回的code是否为200
+        if data.get("code") == 200:
+            mirrors = data.get("data", [])
+            # 根据速度从高到低排序
+            mirrors.sort(key=lambda x: x["speed"], reverse=True)
+            # 提取可用的镜像地址并去除http/https头
+            MIRROR_PREFIXES = [mirror["url"].replace("https://", "").replace("http://", "").strip() for mirror in mirrors if mirror["speed"] > 0]
+            return MIRROR_PREFIXES
+        else:
+            print(f"API返回错误代码：{data.get('code')}")
+            return DEFAULT_MIRRORS
+
+    except requests.RequestException as e:
+        print(f"请求API失败：{e}")
+        return DEFAULT_MIRRORS
+
+# 获取镜像地址
+MIRROR_PREFIXES = get_mirrors()
+
+
 DOWNLOAD_TIMEOUT = 10
 
 def get_absolute_path(relative_path):
@@ -256,7 +288,6 @@ class message_push():
             return False, "连接超时，请检查网络设置"
         except Exception as e:
             return False, f"未知错误：{str(e)}"
-
 
 class ProgramUpdates():
     def __init__(self):
@@ -1899,14 +1930,14 @@ class UpdateCheckerDialog(QDialog):
         @echo off
         chcp 65001 >nul
         setlocal enabledelayedexpansion
-
+        
         :: 设置更新包路径变量（使用绝对路径）
-        set "latest_file={abs_latest_file}"
-
+        set "latest_file={abs_latest_file}
+        
         :main
         echo 正在准备更新环境...
         echo.
-
+        
         :: ========== 进程终止模块 ==========
         echo [1/5] 正在关闭运行中的程序...
         for %%i in ("%~dp0*.exe") do (
@@ -1918,13 +1949,13 @@ class UpdateCheckerDialog(QDialog):
                 echo ℹ️ 未运行进程：%%~nxi
             )
         )
-
+        
         :: ========== 文件操作模块 ==========
         :: 带倒计时的等待
         echo.
         echo [2/5] 等待进程清理（剩余2秒）...
         timeout /t 2 /nobreak >nul
-
+        
         :: 检查更新包是否存在
         echo.
         echo [3/5] 正在解压更新包：!latest_file!
@@ -1933,7 +1964,7 @@ class UpdateCheckerDialog(QDialog):
             echo 路径：!latest_file!
             goto user_choice
         )
-
+        
         :: 解压更新包
         mkdir temp_update 2>nul
         powershell -command "Expand-Archive -Path '!latest_file!' -DestinationPath 'temp_update' -Force"
@@ -1941,7 +1972,7 @@ class UpdateCheckerDialog(QDialog):
             echo ❌ 解压失败，更新包可能损坏！
             goto user_choice
         )
-
+        
         :: 复制文件（显示进度）
         echo.
         echo [4/5] 正在应用更新...
@@ -1951,36 +1982,49 @@ class UpdateCheckerDialog(QDialog):
             goto user_choice
         )
         echo ✅ 文件更新完成！
-
+        
         :: 清理环境
         echo.
         echo [5/5] 正在清理临时文件...
         rd /s /q temp_update 2>nul
         del "!latest_file!" >nul 2>&1
-
+        
         :: ========== 用户选择模块 ==========
         :user_choice
         if exist "%~dp0CHMLFRP_UI.exe" (
             echo.
             choice /c SLC /m "请选择：[S]启动程序 [L]查看日志 [C]退出"
-            if errorlevel 3 exit /b 1
+            if errorlevel 3 (
+                call :self_delete
+                exit /b 1
+            )
             if errorlevel 2 (
                 notepad "%~dp0update.log"
+                call :self_delete
                 exit /b 0
             )
             if errorlevel 1 (
                 start "" "%~dp0CHMLFRP_UI.exe"
+                call :self_delete
                 exit /b 0
             )
         ) else (
             echo.
             choice /c RC /m "请选择：[R]重新检测 [C]退出"
-            if errorlevel 2 exit /b 1
+            if errorlevel 2 (
+                call :self_delete
+                exit /b 1
+            )
             if errorlevel 1 goto main
         )
-
-        :: 自删除脚本
-        del "%~f0" >nul 2>&1
+        
+        :: 自删除子程序
+        :self_delete
+        (
+            ping 127.0.0.1 -n 2 > nul
+            del "%~f0" >nul 2>&1
+        )
+        exit /b 0
         """
 
         # 写入批处理文件（使用UTF-8编码）
