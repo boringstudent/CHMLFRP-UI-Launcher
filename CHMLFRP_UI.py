@@ -42,7 +42,7 @@ urllib3.disable_warnings()
 # ------------------------------以下为程序信息--------------------
 # 程序信息
 APP_NAME = "CUL" # 程序名称
-APP_VERSION = "1.6.0" # 程序版本
+APP_VERSION = "0.6.1" # 程序版本
 PY_VERSION = "3.13.2" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
@@ -257,18 +257,6 @@ class message_push():
         except Exception as e:
             return False, f"未知错误：{str(e)}"
 
-    def send_notification(self, system_name: str, warning_message: str) -> Tuple[bool, str]:
-        """
-        发送系统通知邮件
-
-        :param system_name: 系统名称
-        :param warning_message: 警告消息
-        :return: (成功标志, 状态信息)
-        """
-        subject = f"{system_name}系统告警"
-        body = (f"来自『{self.get_computer_name()}』的 {system_name} 系统在 "
-                f"{self.get_current_time()} 发出警告：\n\n{warning_message}")
-        return self.send(subject, body)
 
 class ProgramUpdates():
     def __init__(self):
@@ -425,12 +413,12 @@ class Pre_run_operations():
         """测试是否有注册表写入权限（示例：尝试写入 HKLM）"""
         try:
             key = win32api.RegCreateKey(
-                win32con.HKEY_CURRENT_USER,
+                win32con.HKEY_LOCAL_MACHINE,
                 "SOFTWARE\\TestKey"
             )
 
             win32api.RegCloseKey(key)
-            win32api.RegDeleteKey(win32con.HKEY_CURRENT_USER, "SOFTWARE\\TestKey")
+            win32api.RegDeleteKey(win32con.HKEY_LOCAL_MACHINE, "SOFTWARE\\TestKey")
             return True
         except Exception as e:
             print(f"注册表访问失败: {e}")
@@ -467,30 +455,47 @@ class Pre_run_operations():
 
     @classmethod
     def document_checking(cls):
-        # 默认设置
+        # 初始化内容
         default_settings = {
-            "auto_start_tunnels": [],
-            "theme": "system",
+            "auto_start_tunnels": [],  # 设置为空列表
+            "theme": "light",
             "log_size_mb": 10,
-            "backup_count": 30
+            "backup_count": 30,  # 设置为30
+            "mail": {
+                "sender_email": "",  # 设置为空字符串
+                "password": "",  # 设置为空字符串
+                "smtp_server": "",  # 设置为空字符串
+                "smtp_port": "",  # 设置为空字符串
+                "notifications": {
+                    "tunnel_offline": False,  # 设置为False
+                    "node_offline": False,  # 设置为False
+                    "tunnel_start": False,  # 设置为False
+                    "node_online": False  # 设置为False
+                }
+            }
         }
 
         # 检查并创建settings.json
-        is_empty, _ = check_file_empty("settings.json")
-        if is_empty:
-            settings_path = get_absolute_path("settings.json")
-            with open(settings_path, 'w', encoding='utf-8') as f:
-                json.dump(default_settings, f, indent=4, ensure_ascii=False)
+        settings_path = get_absolute_path("settings.json")
 
-    @classmethod
-    def document_checking(cls):
-        """文档检查与数据迁移"""
+        # 如果文件不存在或者为空，创建/初始化文件
+        if not os.path.exists(settings_path) or os.path.getsize(settings_path) == 0:
+            try:
+                with open(settings_path, 'w', encoding='utf-8') as f:
+                    json.dump(default_settings, f, indent=4, ensure_ascii=False)
+            except Exception as e:
+                print(f"处理settings.json文件时出错: {e}")
+
+
         # 迁移旧的凭证文件到注册表
         credentials_path = get_absolute_path("credentials.json")
         if os.path.exists(credentials_path):
             try:
-                with open(credentials_path, 'r') as f:
-                    credentials = json.load(f)
+                # 读取凭证文件内容
+                credentials = {}
+                if os.path.getsize(credentials_path) > 0:
+                    with open(credentials_path, 'r') as f:
+                        credentials = json.load(f)
 
                 # 尝试写入注册表
                 key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\ChmlFrp")
@@ -1250,7 +1255,7 @@ class SettingsDialog(QDialog):
                         <h3 style="color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 8px;">相关链接</h3>
                         <ul style="list-style-type: none; padding-left: 0;">
                             <li style="margin: 8px 0;"><a href="https://github.com/Qianyiaz/ChmlFrp_Professional_Launcher" style="color: #0066cc; text-decoration: none;">▸ 千依🅥的cpl</a></li>
-                            <li style="margin: 8px 0;"><a href="https://github.com/FengXiang2233/Xingcheng-Chmlfrp-Lanucher" style="color: #0066cc; text-decoration: none;">▸ 枫相的xcl2</a></li>
+                            <li style="margin: 8px 0;"><a href="https://github.com/FengXiangqaq/Xingcheng-Chmlfrp-Lanucher" style="color: #0066cc; text-decoration: none;">▸ 枫相的xcl2</a></li>
                             <li style="margin: 8px 0;"><a href="https://github.com/boringstudents/CHMLFRP_UI" style="color: #0066cc; text-decoration: none;">▸ 我的"不道a"</a></li>
                             <li style="margin: 8px 0;"><a href="https://github.com/TechCat-Team/ChmlFrp-Frp" style="color: #0066cc; text-decoration: none;">▸ chmlfrp官方魔改的frpc</a></li>
                         </ul>
@@ -1886,72 +1891,108 @@ class UpdateCheckerDialog(QDialog):
             int(num) for num in re.findall(r'CUL1\.(\d+)\.(\d+)\.zip', x)[0]
         ])
 
+        # 获取绝对路径并处理特殊字符
+        abs_latest_file = os.path.abspath(latest_file).replace('&', '^&')
+
         # 创建带进度提示的批处理脚本
         bat_content = f"""
         @echo off
         chcp 65001 >nul
+        setlocal enabledelayedexpansion
+
+        :: 设置更新包路径变量（使用绝对路径）
+        set "latest_file={abs_latest_file}"
+
+        :main
         echo 正在准备更新环境...
         echo.
 
-        :: 关闭当前目录所有exe进程（含进度提示）
+        :: ========== 进程终止模块 ==========
         echo [1/5] 正在关闭运行中的程序...
-        for %%i in ("%cd%\\*.exe") do (
-            taskkill /f /im "%%~nxi" >nul 2>&1
-            if errorlevel 1 (
-                echo 未找到进程：%%~nxi
+        for %%i in ("%~dp0*.exe") do (
+            tasklist /fi "imagename eq %%~nxi" | find "%%~nxi" >nul
+            if !errorlevel! equ 0 (
+                taskkill /f /im "%%~nxi" >nul
+                echo ✅ 已终止进程：%%~nxi
             ) else (
-                echo 已终止进程：%%~nxi
+                echo ℹ️ 未运行进程：%%~nxi
             )
         )
 
+        :: ========== 文件操作模块 ==========
         :: 带倒计时的等待
         echo.
         echo [2/5] 等待进程清理（剩余2秒）...
-        timeout /t 2 /nobreak
+        timeout /t 2 /nobreak >nul
+
+        :: 检查更新包是否存在
+        echo.
+        echo [3/5] 正在解压更新包：!latest_file!
+        if not exist "!latest_file!" (
+            echo ❌ 错误：更新包不存在！
+            echo 路径：!latest_file!
+            goto user_choice
+        )
 
         :: 解压更新包
-        echo.
-        echo [3/5] 正在解压更新包：{os.path.basename(latest_file)}
         mkdir temp_update 2>nul
-        powershell -command "Expand-Archive -Path '{os.path.abspath(latest_file)}' -DestinationPath 'temp_update' -Force"
+        powershell -command "Expand-Archive -Path '!latest_file!' -DestinationPath 'temp_update' -Force"
+        if not exist "temp_update\\CHMLFRP_UI.dist\\" (
+            echo ❌ 解压失败，更新包可能损坏！
+            goto user_choice
+        )
 
-        :: 复制文件
+        :: 复制文件（显示进度）
         echo.
         echo [4/5] 正在应用更新...
-        xcopy /s /y /i "temp_update\\CHMLFRP_UI.dist\\*" "." >nul
-        echo 文件更新完成！
+        xcopy /s /y /i "temp_update\\CHMLFRP_UI.dist\\*" "%~dp0." 
+        if not exist "%~dp0CHMLFRP_UI.exe" (
+            echo ❌ 文件更新失败，主程序缺失！
+            goto user_choice
+        )
+        echo ✅ 文件更新完成！
 
         :: 清理环境
         echo.
         echo [5/5] 正在清理临时文件...
-        rd /s /q temp_update
-        del "{os.path.abspath(latest_file)}" >nul 2>&1
+        rd /s /q temp_update 2>nul
+        del "!latest_file!" >nul 2>&1
 
-        :: 重启程序
-        echo.
-        echo 正在启动新版本...
-        start "" "CHMLFRP_UI.exe"
+        :: ========== 用户选择模块 ==========
+        :user_choice
+        if exist "%~dp0CHMLFRP_UI.exe" (
+            echo.
+            choice /c SLC /m "请选择：[S]启动程序 [L]查看日志 [C]退出"
+            if errorlevel 3 exit /b 1
+            if errorlevel 2 (
+                notepad "%~dp0update.log"
+                exit /b 0
+            )
+            if errorlevel 1 (
+                start "" "%~dp0CHMLFRP_UI.exe"
+                exit /b 0
+            )
+        ) else (
+            echo.
+            choice /c RC /m "请选择：[R]重新检测 [C]退出"
+            if errorlevel 2 exit /b 1
+            if errorlevel 1 goto main
+        )
 
-        :: 自删除脚本（带延迟确保执行完成）
-        ping 127.0.0.1 -n 3 >nul
-        del "%~f0"
-
-        echo.
-        echo 更新已完成！窗口将在3秒后自动关闭...
-        timeout /t 3 /nobreak >nul
+        :: 自删除脚本
+        del "%~f0" >nul 2>&1
         """
 
-        # 写入批处理文件（使用UTF-8编码支持更丰富的字符）
+        # 写入批处理文件（使用UTF-8编码）
         with open("update.bat", "w", encoding="utf-8") as f:
             f.write(bat_content)
 
-        # 启动独立进程执行更新（显示控制台窗口）
+        # 启动独立进程执行更新
         subprocess.Popen(
             ["cmd.exe", "/c", "start", "update.bat"],
             creationflags=subprocess.CREATE_NEW_CONSOLE
         )
-        time.sleep(1)
-        # 关闭当前程序
+        time.sleep(2)
         self.cleanup()
 
     def cleanup(self):
@@ -2287,6 +2328,7 @@ class MainWindow(QMainWindow):
     """主窗口"""
     def __init__(self):
         super().__init__()
+        self.last_node_list = []
         self.stop_worker = None
         self.stop_thread = None
         self.button_hover_color = None
@@ -2385,7 +2427,8 @@ class MainWindow(QMainWindow):
 
         self.node_check_timer = QTimer(self)
         self.node_check_timer.timeout.connect(self.check_node_status)
-        self.node_check_timer.start(60000)
+        self.node_check_timer.timeout.connect(self.check_new_nodes)
+        self.node_check_timer.start(10000)
 
         # 初始化UI
         self.initUI()
@@ -2513,13 +2556,22 @@ class MainWindow(QMainWindow):
                     )
                 self.notify_settings = mail_config.get('notifications', {})
 
-    def send_notification(self, event_type, message):
+    def send_notification(self, event_type, message ,name):
         """发送通知"""
         if not self.mail_notifier or not self.notify_settings.get(event_type, False):
             return
 
         computer_name = message_push.get_computer_name()
         current_time = message_push.get_current_time()
+
+        if event_type == "tunnel_offline":
+            event_type = f"{name}隧道离线了"
+        elif event_type == "node_offline":
+            event_type = f"{name}节点离线了"
+        elif event_type == "tunnel_start":
+            event_type = f"{name}隧道上线了"
+        elif event_type == "node_online":
+            event_type = f"{name}节点上线了"
 
         subject = f"{APP_NAME}系统通知 - {event_type}"
         body = f"""
@@ -2625,32 +2677,43 @@ class MainWindow(QMainWindow):
         if tunnels is None:
             return
 
+        # 将 self.last_node_list 转换为集合，用于快速查找
+        online_nodes = set(self.last_node_list)
+
         for tunnel_name, process in list(self.tunnel_processes.items()):
             tunnel_info = next((t for t in tunnels if t['name'] == tunnel_name), None)
             if tunnel_info:
                 node_name = tunnel_info['node']
-                if not API.is_node_online(node_name, tyen="online"):
+                # 检查节点是否在 self.last_node_list 中
+                if node_name not in online_nodes:
                     self.logger.warning(f"节点 {node_name} 离线，停止隧道 {tunnel_name}")
                     self.stop_tunnel({"name": tunnel_name})
                     QMessageBox.warning(self, "节点离线", f"节点 {node_name} 离线，隧道 {tunnel_name} 已停止")
 
-                if not API.is_node_online(node_name, tyen="online"):
                     self.send_notification("node_offline",
-                                           f"节点 {node_name} 已离线\n最后在线：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                                           f"节点 {node_name} 已离线\n最后在线：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                                           node_name)
             else:
                 self.logger.warning(f"未找到隧道 {tunnel_name} 的信息")
 
-        # 添加节点上线检测
-        def check_new_nodes(self):
-            previous_nodes = set(n['node_name'] for n in self.last_node_list)
-            current_nodes = set(n['node_name'] for n in API.is_node_online(tyen="all")['data'])
+    # 添加节点上线检测
+    def check_new_nodes(self):
+        # 将 self.last_node_list 转换为集合
+        previous_nodes = set(self.last_node_list)
 
-            new_nodes = current_nodes - previous_nodes
-            if new_nodes:
-                for node in new_nodes:
-                    self.send_notification("node_online",
-                                           f"新节点上线：{node}\n上线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                self.last_node_list = API.is_node_online(tyen="all")['data']
+        # 获取当前节点名称
+        current_nodes = set(n['node_name'] for n in API.is_node_online(tyen="all")['data'])
+
+        # 检测新上线的节点
+        new_nodes = current_nodes - previous_nodes
+        if new_nodes:
+            for node in new_nodes:
+                self.send_notification("node_online",
+                                       f"新节点上线：{node}\n上线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                                       node)
+
+            # 更新 self.last_node_list 为当前节点名称列表
+            self.last_node_list = [n['node_name'] for n in API.is_node_online(tyen="all")['data']]
 
     def update_button_styles(self, selected_button):
         for button in self.tab_buttons:
@@ -3676,6 +3739,9 @@ class MainWindow(QMainWindow):
         """加载节点列表"""
         try:
             nodes = API.is_node_online(tyen="all")['data']
+            # 提取节点名称并赋值给 self.last_node_list
+            self.last_node_list = [node['node_name'] for node in nodes]
+
             # 清除现有的节点卡片
             while self.node_container.layout().count():
                 item = self.node_container.layout().takeAt(0)
@@ -3786,7 +3852,8 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
 
                     self.send_notification("tunnel_start",
-                                               f"隧道 {tunnel_info['name']} 已成功启动\n节点：{tunnel_info['node']}")
+                                               f"隧道 {tunnel_info['name']} 已成功启动\n节点：{tunnel_info['node']}",
+                                           tunnel_info['name'])
 
 
                 except Exception as e:
@@ -4000,7 +4067,8 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                                                f"启动时间: {self.tunnel_outputs[tunnel_name]['output']}\n"
                                                f"运行次数: {self.tunnel_outputs[tunnel_name]['run_number']}\n"
                                                f"frpc日志: {self.tunnel_outputs[tunnel_name]['dialog']}\n"
-                                               f"退出代码: {self.tunnel_outputs[tunnel_name]['process']}")
+                                               f"退出代码: {self.tunnel_outputs[tunnel_name]['process']}",
+                                               tunnel_name)
                 else:
                     self.update_tunnel_card_status(tunnel_name, False)
                     self.send_notification("tunnel_offline",
@@ -4009,7 +4077,8 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                                            f"启动时间: {self.tunnel_outputs[tunnel_name]['output']}\n"
                                            f"运行次数: {self.tunnel_outputs[tunnel_name]['run_number']}\n"
                                            f"frpc日志: {self.tunnel_outputs[tunnel_name]['dialog']}\n"
-                                           f"process: {self.tunnel_outputs[tunnel_name]['process']}")
+                                           f"退出代码: {self.tunnel_outputs[tunnel_name]['process']}",
+                                           tunnel_name)
             else:
                 self.update_tunnel_card_status(tunnel_name, False)
                 self.send_notification("tunnel_offline",
@@ -4018,7 +4087,8 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                                        f"启动时间: {self.tunnel_outputs[tunnel_name]['output']}\n"
                                        f"运行次数: {self.tunnel_outputs[tunnel_name]['run_number']}\n"
                                        f"frpc日志: {self.tunnel_outputs[tunnel_name]['dialog']}\n"
-                                       f"退出代码: {self.tunnel_outputs[tunnel_name]['process']}")
+                                       f"退出代码: {self.tunnel_outputs[tunnel_name]['process']}",
+                                       tunnel_name)
             # 删除隧道进程记录
             if tunnel_name in self.tunnel_processes:
                 del self.tunnel_processes[tunnel_name]
