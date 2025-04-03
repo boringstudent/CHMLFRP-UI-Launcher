@@ -79,12 +79,22 @@ jobs:
             exit 1
           }
 
-      - name: Compress with maximum ZIP compression (7-Zip)
+      - name: Ultra compress with 7-Zip (Multi-threaded)
         run: |
           $currentDate = (Get-Date -Format "yyyy_MM_dd")
           $zipFileName = "CHMLFRP_UI_$currentDate.zip"
-          & "C:\Program Files\7-Zip\7z.exe" a -tzip -mx=9 -mmt=on -mfb=256 -mpass=15 "$zipFileName" "./build_output/*"
-          Write-Output "Created high-compression ZIP archive: $zipFileName"
+          & "C:\Program Files\7-Zip\7z.exe" a -tzip `
+            -mmt=on `
+            -mx=9 `
+            -mfb=256 `
+            -md=256m `
+            -mpass=15 `
+            -mmc=10000 `
+            -mqs=on `
+            -bb3 `
+            "$zipFileName" `
+            "./build_output/*"
+          Write-Output "Created ultra-compressed ZIP archive: $zipFileName"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
