@@ -89,8 +89,6 @@ jobs:
             -mfb=256 `
             -md=256m `
             -mpass=15 `
-            -mmc=10000 `
-            -mqs=on `
             -bb3 `
             "$zipFileName" `
             "./build_output/*"
