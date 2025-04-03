@@ -43,7 +43,6 @@ jobs:
           python -m nuitka --standalone --python-flag=-O `
           --include-data-files=./favicon.ico=./favicon.ico `
           --include-data-files=./CUL_update.exe=./CUL_update.exe `
-          --include-data-dir=./_internal=./_internal `
           --include-data-files=./frpc.exe=./frpc.exe `
           --include-package=PyQt6 `
           --upx-binary=$UPX_PATH `
@@ -58,6 +57,17 @@ jobs:
           --nofollow-import-to=psutil.tests,psutil.tests.test_testutils,dns.tests `
           --windows-icon-from-ico=./favicon.ico `
           ./CHMLFRP_UI.py
+
+      - name: Copy _internal directory to build output
+        run: |
+          $buildOutputDir = "./build_output/CHMLFRP_UI.dist"
+          if (Test-Path $buildOutputDir) {
+            Copy-Item -Path "./_internal" -Destination $buildOutputDir -Recurse -Force
+            Write-Host "Successfully copied _internal directory to build output"
+          } else {
+            Write-Error "Build output directory not found at $buildOutputDir"
+            exit 1
+          }
 
       - name: Check if output directory exists
         run: |
