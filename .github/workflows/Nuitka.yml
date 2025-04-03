@@ -37,7 +37,6 @@ jobs:
         run: |
           $UPXPath = (Get-Command upx).Source
           echo "UPX_PATH=$UPXPath" >> $GITHUB_ENV
-
       - name: Build executable with Nuitka
         run: |
           python -m nuitka --standalone --python-flag=-O `
@@ -57,7 +56,6 @@ jobs:
           --nofollow-import-to=psutil.tests,psutil.tests.test_testutils,dns.tests `
           --windows-icon-from-ico=./favicon.ico `
           ./CHMLFRP_UI.py
-
       - name: Copy _internal directory to build output
         run: |
           $buildOutputDir = "./build_output/CHMLFRP_UI.dist"
@@ -68,7 +66,6 @@ jobs:
             Write-Error "Build output directory not found at $buildOutputDir"
             exit 1
           }
-
       - name: Check if output directory exists
         run: |
           $outputDir = "./build_output"
@@ -78,22 +75,12 @@ jobs:
             Write-Error "Output directory not found at $outputDir"
             exit 1
           }
-
-      - name: Ultra compress with 7-Zip (Multi-threaded)
+      - name: Compress with maximum ZIP compression (7-Zip)
         run: |
           $currentDate = (Get-Date -Format "yyyy_MM_dd")
           $zipFileName = "CHMLFRP_UI_$currentDate.zip"
-          & "C:\Program Files\7-Zip\7z.exe" a -tzip `
-            -mmt=on `
-            -mx=9 `
-            -mfb=256 `
-            -md=256m `
-            -mpass=15 `
-            -bb3 `
-            "$zipFileName" `
-            "./build_output/*"
-          Write-Output "Created ultra-compressed ZIP archive: $zipFileName"
-
+          & "C:\Program Files\7-Zip\7z.exe" a -tzip -mx=9 -mmt=on -md=256m -mpass=15 "$zipFileName" "./build_output/*"
+          Write-Output "Created high-compression ZIP archive: $zipFileName"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
