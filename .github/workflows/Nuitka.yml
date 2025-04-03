@@ -78,7 +78,7 @@ jobs:
         run: |
           $currentDate = (Get-Date -Format "yyyy_MM_dd")
           $zipFileName = "CHMLFRP_UI_$currentDate.zip"
-          & "C:\Program Files\7-Zip\7z.exe" a -tzip -mx=9 -mmt=on -mfb=273 -md=256m -mpass=15 "$zipFileName" "./build_output/*"
+          & "C:\Program Files\7-Zip\7z.exe" a -tzip -mx=9 -mmt=on -mfb=256 -md=256m -mpass=15 "$zipFileName" "./build_output/*"
           Write-Output "Created high-compression ZIP archive: $zipFileName"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
