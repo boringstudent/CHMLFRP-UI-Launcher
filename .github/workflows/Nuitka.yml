@@ -32,7 +32,6 @@ jobs:
         run: |
           choco install upx -y
           choco install 7zip -y
-
       - name: Get UPX binary path
         run: |
           $UPXPath = (Get-Command upx).Source
