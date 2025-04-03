@@ -41,13 +41,15 @@ jobs:
         run: |
           python -m nuitka --standalone --python-flag=-O `
           --include-data-files=./favicon.ico=./favicon.ico `
+          --include-data-files=./CUL_update.exe=./CUL_update.exe `
+          --include-data-files=./CUL_update=./CUL_update `
           --include-data-files=./frpc.exe=./frpc.exe `
           --include-package=PyQt6 `
           --upx-binary=$UPX_PATH `
           --include-package-data=PyQt6 `
           --include-qt-plugins=styles,platforms,qml `
           --plugin-enable=pyqt6,upx `
-          --follow-import-to=PyQt6,PyQt6.QtCore,PyQt6.QtGui,PyQt6.QtWidgets,psutil,pyperclip,ipaddress,requests,win32api,win32con,win32security,ctypes,dns `
+          --follow-import-to=PyQt6,PyQt6.QtCore,PyQt6.QtGui,PyQt6.QtWidgets,psutil,pyperclip,ipaddress,requests,dns `
           --remove-output `
           --windows-console-mode=disable `
           --assume-yes-for-downloads `

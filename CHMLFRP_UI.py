@@ -11,21 +11,14 @@ import sys
 import threading
 import time
 import traceback
-import urllib
 import winreg
-import zipfile
 from logging.handlers import *
 import glob
 
 import psutil
 import pyperclip
 import requests
-import win32api
-import win32con
-import win32security
-import ctypes
 import markdown
-import tempfile
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
 from PyQt6.QtWidgets import *
@@ -35,21 +28,17 @@ import urllib3
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional
 import html
 urllib3.disable_warnings()
 
 # ------------------------------以下为程序信息--------------------
 # 程序信息
 APP_NAME = "CUL" # 程序名称
-APP_VERSION = "1.6.1" # 程序版本
+APP_VERSION = "1.6.0" # 程序版本
 PY_VERSION = "3.13.2" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
-PSEXEC_PATH = "PsExec.exe" if os.path.exists("PsExec.exe") else "PsExec"
-PSTOOLS_URL = "https://download.sysinternals.com/files/PSTools.zip"
-PSEXEC_EXE = "PsExec.exe"
-
 # 更新全局配置
 
 DNS_CONFIG = {
@@ -99,10 +88,6 @@ def get_mirrors():
     except requests.RequestException as e:
         print(f"请求API失败：{e}")
         return DEFAULT_MIRRORS
-
-# 获取镜像地址
-MIRROR_PREFIXES = get_mirrors()
-
 
 DOWNLOAD_TIMEOUT = 10
 
@@ -357,132 +342,6 @@ class ProgramUpdates():
 class Pre_run_operations():
     def __init__(self):
         super().__init__()
-
-    @classmethod
-    def _ensure_psexec(cls) -> bool:
-        """确保 PsExec.exe 存在，否则自动下载"""
-        if os.path.exists(PSEXEC_EXE):
-            return True
-
-        print("PsExec 未找到，尝试下载...")
-        try:
-            # 下载 PSTools.zip
-            temp_dir = tempfile.mkdtemp()
-            zip_path = os.path.join(temp_dir, "PSTools.zip")
-            urllib.request.urlretrieve(PSTOOLS_URL, zip_path)
-
-            # 解压并提取 PsExec.exe
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extract(PSEXEC_EXE, temp_dir)
-
-            # 移动到当前目录
-            os.rename(os.path.join(temp_dir, PSEXEC_EXE), PSEXEC_EXE)
-            print("PsExec 下载成功！")
-            return True
-        except Exception as e:
-            print(f"下载 PsExec 失败: {e}")
-            return False
-
-    @classmethod
-    def is_admin(cls) -> bool:
-        """检查当前是否以管理员身份运行"""
-        try:
-            return ctypes.windll.shell32.IsUserAnAdmin()
-        except:
-            return False
-
-    @classmethod
-    def run_as_admin(cls) -> bool:
-        """以管理员身份重新运行程序"""
-        try:
-            ctypes.windll.shell32.ShellExecuteW(
-                None, "runas", sys.executable, " ".join(sys.argv), None, 1
-            )
-            sys.exit(0)
-            return True
-        except Exception as e:
-            print(f"管理员提权失败: {e}")
-            return False
-
-    @classmethod
-    def enable_debug_privilege(cls) -> bool:
-        """启用 SeDebugPrivilege 权限"""
-        try:
-            token = win32security.OpenProcessToken(
-                win32api.GetCurrentProcess(),
-                win32security.TOKEN_ADJUST_PRIVILEGES | win32security.TOKEN_QUERY
-            )
-            priv = win32security.LookupPrivilegeValue(None, win32security.SE_DEBUG_NAME)
-            win32security.AdjustTokenPrivileges(
-                token,
-                False,
-                [(priv, win32security.SE_PRIVILEGE_ENABLED)]
-            )
-            return win32api.GetLastError() == 0
-        except Exception as e:
-            print(f"SeDebugPrivilege 启用失败: {e}")
-            return False
-
-    @classmethod
-    def run_as_trusted_installer(cls) -> bool:
-        """使用 PsExec 以 SYSTEM 权限运行（接近 TrustedInstaller）"""
-        if not cls._ensure_psexec():
-            return False
-
-        try:
-            # -i: 交互式, -s: SYSTEM 权限, -accepteula: 自动接受协议
-            cmd = [PSEXEC_EXE, "-i", "-s", "-accepteula", sys.executable] + sys.argv
-            subprocess.run(cmd, check=True)
-            sys.exit(0)
-            return True
-        except Exception as e:
-            print(f"TrustedInstaller 提权失败: {e}")
-            return False
-
-    @classmethod
-    def test_registry_access(cls) -> bool:
-        """测试是否有注册表写入权限（示例：尝试写入 HKLM）"""
-        try:
-            key = win32api.RegCreateKey(
-                win32con.HKEY_LOCAL_MACHINE,
-                "SOFTWARE\\TestKey"
-            )
-
-            win32api.RegCloseKey(key)
-            win32api.RegDeleteKey(win32con.HKEY_LOCAL_MACHINE, "SOFTWARE\\TestKey")
-            return True
-        except Exception as e:
-            print(f"注册表访问失败: {e}")
-            return False
-
-    @classmethod
-    def elevation_rights(cls):
-        """
-        提权逻辑：
-        1. 检查是否已有权限修改注册表
-        2. 如果没有，尝试启用 SeDebugPrivilege
-        3. 如果仍然失败，尝试以 TrustedInstaller 运行（使用 PsExec）
-        """
-        if cls.test_registry_access():
-            print("已有足够权限，无需提权")
-            return True
-
-        print("当前权限不足，尝试提权...")
-
-        # 1. 如果不是管理员，先提权到管理员
-        if not cls.is_admin():
-            print("当前非管理员，尝试提权...")
-            return cls.run_as_admin()
-
-        # 2. 尝试启用 SeDebugPrivilege
-        if cls.enable_debug_privilege():
-            print("SeDebugPrivilege 启用成功，再次尝试...")
-            if cls.test_registry_access():
-                return True
-
-        # 3. 如果仍然失败，使用 PsExec 以 TrustedInstaller 运行
-        print("SeDebugPrivilege 仍不足，尝试 TrustedInstaller...")
-        return cls.run_as_trusted_installer()
 
     @classmethod
     def document_checking(cls):
@@ -1911,133 +1770,19 @@ class UpdateCheckerDialog(QDialog):
         if reply == QMessageBox.StandardButton.No:
             return
 
-        # 查找最新的更新包（格式为CUL1.x.x.zip）
-        local_updates = glob.glob("CUL1.*.zip")
-        if not local_updates:
-            QMessageBox.warning(self, "更新失败", "未找到更新包")
-            return
-
-        # 按版本号排序找到最新包
-        latest_file = max(local_updates, key=lambda x: [
-            int(num) for num in re.findall(r'CUL1\.(\d+)\.(\d+)\.zip', x)[0]
-        ])
-
-        # 获取绝对路径并处理特殊字符
-        abs_latest_file = os.path.abspath(latest_file).replace('&', '^&')
-
-        # 创建带进度提示的批处理脚本
-        bat_content = f"""
-        @echo off
-        chcp 65001 >nul
-        setlocal enabledelayedexpansion
-        
-        :: 设置更新包路径变量（使用绝对路径）
-        set "latest_file={abs_latest_file}
-        
-        :main
-        echo 正在准备更新环境...
-        echo.
-        
-        :: ========== 进程终止模块 ==========
-        echo [1/5] 正在关闭运行中的程序...
-        for %%i in ("%~dp0*.exe") do (
-            tasklist /fi "imagename eq %%~nxi" | find "%%~nxi" >nul
-            if !errorlevel! equ 0 (
-                taskkill /f /im "%%~nxi" >nul
-                echo ✅ 已终止进程：%%~nxi
-            ) else (
-                echo ℹ️ 未运行进程：%%~nxi
+        # 直接启动更新程序
+        try:
+            subprocess.Popen(
+                ["start", "CUL_update.exe"],
+                shell=True
             )
-        )
-        
-        :: ========== 文件操作模块 ==========
-        :: 带倒计时的等待
-        echo.
-        echo [2/5] 等待进程清理（剩余2秒）...
-        timeout /t 2 /nobreak >nul
-        
-        :: 检查更新包是否存在
-        echo.
-        echo [3/5] 正在解压更新包：!latest_file!
-        if not exist "!latest_file!" (
-            echo ❌ 错误：更新包不存在！
-            echo 路径：!latest_file!
-            goto user_choice
-        )
-        
-        :: 解压更新包
-        mkdir temp_update 2>nul
-        powershell -command "Expand-Archive -Path '!latest_file!' -DestinationPath 'temp_update' -Force"
-        if not exist "temp_update\\CHMLFRP_UI.dist\\" (
-            echo ❌ 解压失败，更新包可能损坏！
-            goto user_choice
-        )
-        
-        :: 复制文件（显示进度）
-        echo.
-        echo [4/5] 正在应用更新...
-        xcopy /s /y /i "temp_update\\CHMLFRP_UI.dist\\*" "%~dp0." 
-        if not exist "%~dp0CHMLFRP_UI.exe" (
-            echo ❌ 文件更新失败，主程序缺失！
-            goto user_choice
-        )
-        echo ✅ 文件更新完成！
-        
-        :: 清理环境
-        echo.
-        echo [5/5] 正在清理临时文件...
-        rd /s /q temp_update 2>nul
-        del "!latest_file!" >nul 2>&1
-        
-        :: ========== 用户选择模块 ==========
-        :user_choice
-        if exist "%~dp0CHMLFRP_UI.exe" (
-            echo.
-            choice /c SLC /m "请选择：[S]启动程序 [L]查看日志 [C]退出"
-            if errorlevel 3 (
-                call :self_delete
-                exit /b 1
+            time.sleep(2)  # 短暂延迟确保更新程序启动
+            self.cleanup()  # 清理当前程序
+        except Exception as e:
+            QMessageBox.critical(
+                self, "更新错误",
+                f"无法启动更新程序: {str(e)}"
             )
-            if errorlevel 2 (
-                notepad "%~dp0update.log"
-                call :self_delete
-                exit /b 0
-            )
-            if errorlevel 1 (
-                start "" "%~dp0CHMLFRP_UI.exe"
-                call :self_delete
-                exit /b 0
-            )
-        ) else (
-            echo.
-            choice /c RC /m "请选择：[R]重新检测 [C]退出"
-            if errorlevel 2 (
-                call :self_delete
-                exit /b 1
-            )
-            if errorlevel 1 goto main
-        )
-        
-        :: 自删除子程序
-        :self_delete
-        (
-            ping 127.0.0.1 -n 2 > nul
-            del "%~f0" >nul 2>&1
-        )
-        exit /b 0
-        """
-
-        # 写入批处理文件（使用UTF-8编码）
-        with open("update.bat", "w", encoding="utf-8") as f:
-            f.write(bat_content)
-
-        # 启动独立进程执行更新
-        subprocess.Popen(
-            ["cmd.exe", "/c", "start", "update.bat"],
-            creationflags=subprocess.CREATE_NEW_CONSOLE
-        )
-        time.sleep(2)
-        self.cleanup()
 
     def cleanup(self):
         # 终止所有子进程
@@ -5000,9 +4745,10 @@ if __name__ == '__main__':
             main_thread = main_thread.tb_next
         sys.__excepthook__(exctype, value, main_thread)
 
-    sys.excepthook = exception_hook
     try:
-        Pre_run_operations.elevation_rights()  # 提权
+        sys.excepthook = exception_hook
+        # 获取镜像地址
+        MIRROR_PREFIXES = get_mirrors()
         Pre_run_operations.document_checking()  # 配置文件检查
         app = QApplication(sys.argv)
         main_window = MainWindow()
