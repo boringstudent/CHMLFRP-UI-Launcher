@@ -28,9 +28,10 @@ jobs:
           pip install upx
           pip install -r requirements.txt
           
-      - name: Install UPX
+      - name: Install required tools
         run: |
           choco install upx -y
+          choco install 7zip -y
 
       - name: Get UPX binary path
         run: |
@@ -68,12 +69,12 @@ jobs:
             exit 1
           }
 
-      - name: Compress build output
+      - name: Compress with maximum ZIP compression (7-Zip)
         run: |
           $currentDate = (Get-Date -Format "yyyy_MM_dd")
           $zipFileName = "CHMLFRP_UI_$currentDate.zip"
-          Compress-Archive -Path "./build_output/*" -DestinationPath $zipFileName
-          Write-Output "Compressed build output to $zipFileName"
+          & "C:\Program Files\7-Zip\7z.exe" a -tzip -mx=9 -mmt=on -mfb=256 -mpass=15 "$zipFileName" "./build_output/*"
+          Write-Output "Created high-compression ZIP archive: $zipFileName"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
