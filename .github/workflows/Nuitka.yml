@@ -42,7 +42,7 @@ jobs:
           python -m nuitka --standalone --python-flag=-O `
           --include-data-files=./favicon.ico=./favicon.ico `
           --include-data-files=./CUL_update.exe=./CUL_update.exe `
-          --include-data-files=./CUL_update=./CUL_update `
+          --include-data-dir=./CUL_update=./CUL_update `
           --include-data-files=./frpc.exe=./frpc.exe `
           --include-package=PyQt6 `
           --upx-binary=$UPX_PATH `
