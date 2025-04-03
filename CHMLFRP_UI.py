@@ -35,7 +35,7 @@ urllib3.disable_warnings()
 # ------------------------------以下为程序信息--------------------
 # 程序信息
 APP_NAME = "CUL" # 程序名称
-APP_VERSION = "1.6.0" # 程序版本
+APP_VERSION = "1.6.2" # 程序版本
 PY_VERSION = "3.13.2" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
