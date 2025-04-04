@@ -3808,20 +3808,24 @@ class MainWindow(QMainWindow):
         self.logout_button.clicked.connect(self.logout)
         self.logout_button.setEnabled(False)
 
-        # 添加查看消息按钮
+        # 添加消息和黑名单按钮
         self.messages_button = QPushButton('系统消息', self)
         self.messages_button.clicked.connect(self.show_messages)
-        self.messages_button.setIcon(QIcon.fromTheme("mail-message"))
 
-        login_layout = QHBoxLayout()
-        login_layout.addWidget(self.login_button)
-        login_layout.addWidget(self.logout_button)
-        login_layout.addWidget(self.messages_button)
+        self.blacklist_button = QPushButton('黑名单查询', self)
+        self.blacklist_button.clicked.connect(self.show_blacklist)
+
+        # 布局按钮
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.login_button)
+        button_layout.addWidget(self.logout_button)
+        button_layout.addWidget(self.messages_button)
+        button_layout.addWidget(self.blacklist_button)
 
         layout.addWidget(self.username_input)
         layout.addWidget(self.password_input)
         layout.addWidget(self.token_input)
-        layout.addLayout(login_layout)
+        layout.addLayout(button_layout)
 
         self.user_info_display = QTextEdit()
         self.user_info_display.setReadOnly(True)
@@ -3831,6 +3835,7 @@ class MainWindow(QMainWindow):
 
         self.content_stack.addWidget(user_info_widget)
 
+    # 添加显示消息对话框方法
     def show_messages(self):
         """显示系统消息对话框"""
         dialog = MessageDialog(self.token, self)
@@ -3838,6 +3843,15 @@ class MainWindow(QMainWindow):
             dialog.apply_theme(self.dark_theme)
         dialog.exec()
 
+    # 添加显示黑名单对话框方法
+    def show_blacklist(self):
+        """显示黑名单对话框"""
+        dialog = BlacklistDialog(self)
+        if hasattr(self, 'dark_theme'):
+            dialog.apply_theme(self.dark_theme)
+        dialog.exec()
+
+    # 自动检查消息方法
     def auto_check_messages(self):
         """自动检查是否有未读消息"""
         if not self.token:
@@ -3848,7 +3862,7 @@ class MainWindow(QMainWindow):
             params = {"token": self.token}
             headers = get_headers()
 
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers)
             if response.status_code == 200:
                 data = response.json()
                 if data['code'] == 200:
@@ -3861,6 +3875,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.logger.error(f"检查消息时发生错误: {str(e)}")
 
+    # 显示消息通知方法
     def show_message_notification(self, count):
         """显示消息通知"""
         notification = QMessageBox(self)
@@ -6733,6 +6748,249 @@ class MessageDialog(QDialog):
                 QTextEdit { background-color: #FFFFFF; color: #212529; border: 1px solid #CED4DA; }
                 QPushButton { background-color: #0D6EFD; color: white; border-radius: 4px; padding: 6px 12px; }
                 QPushButton:hover { background-color: #0B5ED7; }
+            """)
+
+class BlacklistManager:
+    """管理黑名单数据的类"""
+
+    def __init__(self, logger=None):
+        self.blacklist = []
+        self.blacklist_loaded = False
+        self.logger = logger
+
+    def load_blacklist(self):
+        """加载黑名单数据"""
+        try:
+            import requests
+
+            # 使用内网穿透.中国 的黑名单API
+            url = "https://xn--6orp08a.xn--v6qw21h0gd43u.xn--fiqs8s/v1/blacklist/list/all"
+            response = requests.get(url, timeout=10)
+
+            # 检查请求是否成功
+            if response.status_code == 200:
+                data = response.json()
+
+                # 检查API返回结构
+                if 'data' in data and 'list' in data['data']:
+                    self.blacklist = data['data']['list']
+                    self.blacklist_loaded = True
+
+                    return True
+                else:
+                    if self.logger:
+                        self.logger.error("黑名单API返回格式不正确")
+            else:
+                if self.logger:
+                    self.logger.error(f"黑名单API请求失败，状态码: {response.status_code}")
+
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"加载黑名单时发生错误: {str(e)}")
+
+        return False
+
+    def display_blacklist(self):
+        """获取格式化的黑名单列表，用于显示"""
+        if not self.blacklist_loaded:
+            if not self.load_blacklist():
+                return "无法加载黑名单数据"
+
+        if not self.blacklist:
+            return "黑名单为空"
+
+        formatted_list = []
+        for item in self.blacklist:
+            email = item.get('email', 'N/A')
+            reason = item.get('reason', '未指定原因')
+            created_date = item.get('createdAt', '未知时间')
+            updated_date = item.get('updatedAt', '未知时间')
+
+            formatted_list.append(
+                f"邮箱: {email}\n原因: {reason}\n创建日期: {created_date}\n更新日期: {updated_date}\n")
+
+        return "\n".join(formatted_list)
+
+    def get_blacklist_data(self):
+        """获取原始黑名单数据"""
+        if not self.blacklist_loaded:
+            self.load_blacklist()
+
+        return self.blacklist
+
+class BlacklistDialog(QDialog):
+    """黑名单信息对话框"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.blacklist_manager = BlacklistManager(logger=parent.logger if parent else None)
+
+        self.setWindowTitle("黑名单列表")
+        self.setMinimumWidth(650)  # 增加宽度以容纳更多内容
+        self.setMinimumHeight(500)
+        self.init_ui()
+        self.load_blacklist()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # 搜索区域
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索:")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("输入邮箱或原因关键词")
+        self.search_input.textChanged.connect(self.filter_blacklist)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.search_input)
+        layout.addLayout(search_layout)
+
+        # 黑名单表格
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["邮箱", "原因", "创建日期", "更新日期"])
+
+        # 设置表格列宽
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # 邮箱列自适应
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # 原因列自适应
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # 创建日期列自适应内容
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # 更新日期列自适应内容
+
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        layout.addWidget(self.table)
+
+        # 统计信息
+        self.stats_label = QLabel("加载中...")
+        layout.addWidget(self.stats_label)
+
+        # 按钮区域
+        button_layout = QHBoxLayout()
+        refresh_button = QPushButton("刷新")
+        refresh_button.clicked.connect(self.load_blacklist)
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(self.accept)
+        button_layout.addWidget(refresh_button)
+        button_layout.addStretch()
+        button_layout.addWidget(close_button)
+        layout.addLayout(button_layout)
+
+    def load_blacklist(self):
+        """加载黑名单数据到表格"""
+        # 显示加载状态
+        self.table.setRowCount(0)
+        self.stats_label.setText("正在加载黑名单数据...")
+        QApplication.processEvents()
+
+        # 加载数据
+        success = self.blacklist_manager.load_blacklist()
+        if not success:
+            self.stats_label.setText("无法加载黑名单数据，请检查网络连接")
+            return
+
+        # 显示数据
+        self.populate_table()
+
+    def format_datetime(self, datetime_str):
+        """格式化日期时间显示"""
+        if not datetime_str:
+            return "未知时间"
+
+        try:
+            # 将ISO格式的时间转换为更友好的显示格式
+            # 输入格式: 2024-07-22T18:51:38.000+00:00
+            # 输出格式: 2024-07-22 18:51:38
+            date_time_parts = datetime_str.split('T')
+            date = date_time_parts[0]
+            time = date_time_parts[1].split('.')[0]
+            return f"{date} {time}"
+        except:
+            return datetime_str
+
+    def populate_table(self, filter_text=None):
+        """将数据填充到表格，可选过滤条件"""
+        self.table.setRowCount(0)
+        blacklist = self.blacklist_manager.get_blacklist_data()
+
+        if not blacklist:
+            self.stats_label.setText("黑名单为空")
+            return
+
+        # 过滤数据
+        if filter_text:
+            filter_text = filter_text.lower()
+            filtered_list = [
+                item for item in blacklist
+                if filter_text in item.get('email', '').lower() or
+                   filter_text in item.get('reason', '').lower()
+            ]
+        else:
+            filtered_list = blacklist
+
+        # 填充表格
+        for row, item in enumerate(filtered_list):
+            self.table.insertRow(row)
+
+            # 处理可能包含多个邮箱的情况
+            email = item.get('email', 'N/A')
+            if ';' in email:
+                email = email.replace(';', '\n')
+
+            reason = item.get('reason', '未指定原因')
+            created_at = self.format_datetime(item.get('createdAt', ''))
+            updated_at = self.format_datetime(item.get('updatedAt', ''))
+
+            email_item = QTableWidgetItem(email)
+            email_item.setToolTip(email)  # 设置工具提示，便于查看完整内容
+
+            reason_item = QTableWidgetItem(reason)
+            reason_item.setToolTip(reason)  # 设置工具提示
+
+            self.table.setItem(row, 0, email_item)
+            self.table.setItem(row, 1, reason_item)
+            self.table.setItem(row, 2, QTableWidgetItem(created_at))
+            self.table.setItem(row, 3, QTableWidgetItem(updated_at))
+
+        # 允许表格行高自适应内容
+        for row in range(self.table.rowCount()):
+            self.table.resizeRowToContents(row)
+
+        # 更新统计信息
+        if filter_text:
+            self.stats_label.setText(f"显示 {len(filtered_list)}/{len(blacklist)} 条记录 (已过滤)")
+        else:
+            self.stats_label.setText(f"共 {len(blacklist)} 条记录")
+
+    def filter_blacklist(self):
+        """根据搜索框内容过滤黑名单列表"""
+        filter_text = self.search_input.text().strip()
+        self.populate_table(filter_text)
+
+    def apply_theme(self, is_dark):
+        """应用主题"""
+        if is_dark:
+            self.setStyleSheet("""
+                QDialog { background-color: #2D2D2D; color: #FFFFFF; }
+                QTableWidget { background-color: #3D3D3D; color: #FFFFFF; border: 1px solid #555555; }
+                QTableWidget::item:alternate { background-color: #353535; }
+                QHeaderView::section { background-color: #2A2A2A; color: #FFFFFF; padding: 5px; border: 1px solid #555555; }
+                QLineEdit { background-color: #3D3D3D; color: #FFFFFF; border: 1px solid #555555; padding: 5px; }
+                QPushButton { background-color: #0D6EFD; color: white; border-radius: 4px; padding: 6px 12px; }
+                QPushButton:hover { background-color: #0B5ED7; }
+                QLabel { color: #FFFFFF; }
+            """)
+        else:
+            self.setStyleSheet("""
+                QDialog { background-color: #FFFFFF; color: #212529; }
+                QTableWidget { background-color: #FFFFFF; color: #212529; border: 1px solid #DEE2E6; }
+                QTableWidget::item:alternate { background-color: #F8F9FA; }
+                QHeaderView::section { background-color: #E9ECEF; color: #212529; padding: 5px; border: 1px solid #DEE2E6; }
+                QLineEdit { background-color: #FFFFFF; color: #212529; border: 1px solid #CED4DA; padding: 5px; }
+                QPushButton { background-color: #0D6EFD; color: white; border-radius: 4px; padding: 6px 12px; }
+                QPushButton:hover { background-color: #0B5ED7; }
+                QLabel { color: #212529; }
             """)
 
 if __name__ == '__main__':
