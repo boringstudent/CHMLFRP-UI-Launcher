@@ -783,7 +783,6 @@ class TunnelCard(QFrame):
             self.setStyleSheet(self.styleSheet().replace(
                 "TunnelCard { border: 2px solid #0066cc; background-color: rgba(224, 224, 224, 50); }", ""))
 
-
 class BatchEditDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1085,7 +1084,6 @@ class StopWorker(QObject):
         else:
             self.progress.emit("没有发现残留的 frpc.exe 进程")
 
-
 class OutputDialog(QDialog):
     """隧道输出对话框"""
     output_update_signal = pyqtSignal(str, str, int)
@@ -1101,9 +1099,8 @@ class OutputDialog(QDialog):
     def setup_ui(self):
         """设置UI"""
         layout = QVBoxLayout(self)
-
-        # Add run selector
         run_layout = QHBoxLayout()
+
         run_layout.addWidget(QLabel("运行记录:"))
         self.run_selector = QComboBox()
         self.run_selector.currentIndexChanged.connect(self.on_run_changed)
@@ -1111,12 +1108,10 @@ class OutputDialog(QDialog):
         run_layout.addStretch()
         layout.addLayout(run_layout)
 
-        # Output display
         self.output_browser = QTextBrowser()
         self.output_browser.setOpenExternalLinks(True)
         layout.addWidget(self.output_browser)
 
-        # Button layout
         button_layout = QHBoxLayout()
         clear_button = QPushButton("清除输出")
         clear_button.clicked.connect(self.clear_output)
@@ -1153,22 +1148,17 @@ class OutputDialog(QDialog):
 
     def update_run_selector(self):
         """更新运行记录选择器"""
-        # Block signals to prevent triggering currentIndexChanged during setup
         self.run_selector.blockSignals(True)
 
-        # Get current selection if any
         currently_selected = self.run_selector.currentData()
 
-        # Clear and repopulate
         self.run_selector.clear()
 
-        # Add all known runs in sorted order
         run_numbers = sorted(self.runs_data.keys())
 
         for run_number in run_numbers:
             self.run_selector.addItem(f"运行 #{run_number}", run_number)
 
-        # Always select the most recent run by default
         if self.run_selector.count() > 0:
             latest_run = max(run_numbers) if run_numbers else None
 
@@ -1177,9 +1167,7 @@ class OutputDialog(QDialog):
                 if latest_index >= 0:
                     self.run_selector.setCurrentIndex(latest_index)
 
-                    # Update the display with the latest run's content
                     self.output_browser.setHtml(self.runs_data[latest_run])
-                    # Scroll to bottom
                     self.output_browser.verticalScrollBar().setValue(
                         self.output_browser.verticalScrollBar().maximum()
                     )
@@ -1194,7 +1182,6 @@ class OutputDialog(QDialog):
         run_number = self.run_selector.itemData(index)
         if run_number in self.runs_data:
             self.output_browser.setHtml(self.runs_data[run_number])
-            # Scroll to bottom
             self.output_browser.verticalScrollBar().setValue(
                 self.output_browser.verticalScrollBar().maximum()
             )
@@ -1211,8 +1198,6 @@ class OutputDialog(QDialog):
     def showEvent(self, event):
         """对话框显示时触发"""
         super().showEvent(event)
-
-        # When dialog is shown, make sure the latest run is selected
         if self.runs_data and self.run_selector.count() > 0:
             latest_run = max(self.runs_data.keys())
             latest_index = self.run_selector.findData(latest_run)
@@ -1236,8 +1221,6 @@ class SettingsDialog(QDialog):
         self.init_ui()
         self.load_settings()
         self.apply_theme(parent.dark_theme)
-
-
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -2335,7 +2318,6 @@ class NodeCard(QFrame):
             self.clicked.emit(self.node_info)
         super().mousePressEvent(event)
 
-
 class BackupNodeConfigDialog(QDialog):
     def __init__(self, tunnel_info, token, parent=None):
         super().__init__(parent)
@@ -2401,7 +2383,7 @@ class BackupNodeConfigDialog(QDialog):
         layout.addWidget(node_group)
 
         domain_group = QGroupBox("域名绑定配置")
-        self.domain_layout = QVBoxLayout()  # ← Store the layout in self.domain_layout
+        self.domain_layout = QVBoxLayout()
 
         self.use_domain_checkbox = QCheckBox("为此隧道绑定域名")
         self.domain_layout.addWidget(self.use_domain_checkbox)
@@ -2464,7 +2446,7 @@ class BackupNodeConfigDialog(QDialog):
             if data['code'] == 200:
                 self.existing_domain_combo.clear()
                 for domain in data['data']:
-                    if domain['type'] == 'CNAME':  # Only show CNAME records
+                    if domain['type'] == 'CNAME':
                         domain_text = f"{domain['record']}.{domain['domain']}"
                         self.existing_domain_combo.addItem(domain_text, domain)
             else:
@@ -2473,7 +2455,7 @@ class BackupNodeConfigDialog(QDialog):
             self.parent.logger.error(f"加载域名列表失败: {str(e)}")
 
     def load_main_domains(self):
-        """Load available main domains into combo box"""
+        """将可用的主域加载到组合框"""
         try:
             url = "http://cf-v2.uapis.cn/list_available_domains"
             headers = get_headers()
@@ -2490,6 +2472,46 @@ class BackupNodeConfigDialog(QDialog):
                 self.parent.logger.error(f"获取主域名请求失败: 状态码 {response.status_code}")
         except Exception as e:
             self.parent.logger.error(f"加载主域名时发生错误: {str(e)}")
+
+    # 添加域名状态检查函数
+    def check_domain_target_status(self, domain_info):
+        """检查域名是否指向正确的节点"""
+        try:
+            url = f"http://cf-v2.uapis.cn/get_free_subdomain_info"
+            params = {
+                "token": self.parent.token,
+                "domain": domain_info['domain'],
+                "record": domain_info['record']
+            }
+
+            headers = get_headers()
+            response = requests.get(url, headers=headers, params=params)
+            data = response.json()
+
+            if data['code'] != 200:
+                QMessageBox.warning(self, "错误", f"获取域名信息失败: {data.get('msg', '')}")
+                return
+
+            current_target = data['data'].get('target', '')
+
+            # 获取当前节点信息
+            node_info = self.parent.get_node_info(self.tunnel_info['node'])
+            if not node_info:
+                QMessageBox.warning(self, "错误", "无法获取节点信息")
+                return
+
+            # 计算预期的目标
+            expected_target = self.parent.get_tunnel_target(self.tunnel_info, node_info)
+
+            if current_target == expected_target:
+                QMessageBox.information(self, "域名状态",
+                                        f"域名 {domain_info['record']}.{domain_info['domain']} 当前指向正确的节点目标:\n{current_target}")
+            else:
+                QMessageBox.warning(self, "域名状态",
+                                    f"域名指向不正确!\n当前目标: {current_target}\n预期目标: {expected_target}\n\n点击保存按钮更新域名")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"检查域名状态时发生错误: {str(e)}")
+
 
     def load_existing_config(self):
         """在BackupNodeConfigDialog中加载现有备用节点配置，并显示域名更新状态"""
@@ -2563,48 +2585,8 @@ class BackupNodeConfigDialog(QDialog):
             except Exception as e:
                 self.parent.logger.error(f"创建备用节点配置文件失败: {str(e)}")
 
-        # 添加域名状态检查函数
-        def check_domain_target_status(self, domain_info):
-            """检查域名是否指向正确的节点"""
-            try:
-                url = f"http://cf-v2.uapis.cn/get_free_subdomain_info"
-                params = {
-                    "token": self.parent.token,
-                    "domain": domain_info['domain'],
-                    "record": domain_info['record']
-                }
-
-                headers = get_headers()
-                response = requests.get(url, headers=headers, params=params)
-                data = response.json()
-
-                if data['code'] != 200:
-                    QMessageBox.warning(self, "错误", f"获取域名信息失败: {data.get('msg', '')}")
-                    return
-
-                current_target = data['data'].get('target', '')
-
-                # 获取当前节点信息
-                node_info = self.parent.get_node_info(self.tunnel_info['node'])
-                if not node_info:
-                    QMessageBox.warning(self, "错误", "无法获取节点信息")
-                    return
-
-                # 计算预期的目标
-                expected_target = self.parent.get_tunnel_target(self.tunnel_info, node_info)
-
-                if current_target == expected_target:
-                    QMessageBox.information(self, "域名状态",
-                                            f"域名 {domain_info['record']}.{domain_info['domain']} 当前指向正确的节点目标:\n{current_target}")
-                else:
-                    QMessageBox.warning(self, "域名状态",
-                                        f"域名指向不正确!\n当前目标: {current_target}\n预期目标: {expected_target}\n\n点击保存按钮更新域名")
-            except Exception as e:
-                QMessageBox.critical(self, "错误", f"检查域名状态时发生错误: {str(e)}")
-
     def save_config(self):
         try:
-            # Get selected backup nodes
             selected_nodes = []
             for item in self.node_list.selectedItems():
                 selected_nodes.append(item.text())
@@ -2660,7 +2642,6 @@ class BackupNodeConfigDialog(QDialog):
         except Exception as e:
             self.parent.logger.error(f"保存备用节点配置失败: {str(e)}")
             QMessageBox.warning(self, "错误", f"保存配置失败: {str(e)}")
-
 
 class MainWindow(QMainWindow):
     """主窗口"""
@@ -2895,7 +2876,6 @@ class MainWindow(QMainWindow):
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.logger.info(f"隧道 '{tunnel_info['name']}' 的备用节点配置已保存")
-
             # 配置保存后刷新隧道列表，显示更新后的备用节点状态
             self.load_tunnels()
 
@@ -2904,9 +2884,7 @@ class MainWindow(QMainWindow):
         config_path = get_absolute_path("backup_config.json")
         if os.path.exists(config_path):
             try:
-                # Check if file is empty
                 if os.path.getsize(config_path) == 0:
-                    # File exists but is empty, initialize with empty dict
                     with open(config_path, 'w') as f:
                         json.dump({}, f)
                     return None
@@ -2915,7 +2893,6 @@ class MainWindow(QMainWindow):
                     configs = json.load(f)
                     return configs.get(str(tunnel_id))
             except json.JSONDecodeError:
-                # If file is invalid JSON, initialize it
                 self.logger.error(f"备用节点配置文件格式错误，重新初始化")
                 with open(config_path, 'w') as f:
                     json.dump({}, f)
@@ -2923,7 +2900,6 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self.logger.error(f"读取备用节点配置失败: {str(e)}")
         else:
-            # If file doesn't exist, create it with empty dict
             try:
                 with open(config_path, 'w') as f:
                     json.dump({}, f)
@@ -2952,15 +2928,12 @@ class MainWindow(QMainWindow):
         try:
             config_path = get_absolute_path("backup_config.json")
             if not os.path.exists(config_path):
-                # If file doesn't exist, create it with empty dict
                 with open(config_path, 'w') as f:
                     json.dump({}, f)
                 self.logger.info("已创建备用节点配置文件")
                 return
 
-            # Check if file is empty
             if os.path.getsize(config_path) == 0:
-                # Initialize with empty dict
                 with open(config_path, 'w') as f:
                     json.dump({}, f)
                 return
@@ -2969,7 +2942,6 @@ class MainWindow(QMainWindow):
                 with open(config_path, 'r') as f:
                     configs = json.load(f)
             except json.JSONDecodeError:
-                # If file is invalid JSON, initialize it
                 self.logger.error(f"备用节点配置文件格式错误，重新初始化")
                 with open(config_path, 'w') as f:
                     json.dump({}, f)
@@ -2982,7 +2954,6 @@ class MainWindow(QMainWindow):
             tunnel_ids = [str(t['id']) for t in tunnels]
             modified = False
 
-            # Remove configurations for tunnels that no longer exist
             for tunnel_id in list(configs.keys()):
                 if tunnel_id not in tunnel_ids:
                     del configs[tunnel_id]
@@ -2995,13 +2966,11 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             self.logger.error(f"清理备用节点配置时发生错误: {str(e)}")
-            # Always ensure the file exists and is valid JSON
             try:
                 with open(config_path, 'w') as f:
                     json.dump({}, f)
             except:
                 pass
-
 
     def load_mail_config(self):
         """加载邮件配置"""
@@ -3046,7 +3015,6 @@ class MainWindow(QMainWindow):
         详细信息：
         {message}
         """
-
         # 在子线程中发送邮件避免阻塞UI
         threading.Thread(target=self.mail_notifier.send,
                          args=(subject, body),
@@ -3280,64 +3248,6 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             self.logger.error(f"检查隧道域名配置时发生错误: {str(e)}")
-
-    def check_domains_for_all_tunnels(self):
-        """检查所有隧道的域名配置是否需要更新"""
-        if not self.token:
-            return
-
-        try:
-            tunnels = API.get_user_tunnels(self.token)
-            if tunnels is None:
-                return
-
-            for tunnel in tunnels:
-                # 只检查当前正在运行的隧道
-                if tunnel['name'] in self.tunnel_processes:
-                    self.check_domain_for_tunnel(tunnel)
-
-        except Exception as e:
-            self.logger.error(f"检查所有域名配置时发生错误: {str(e)}")
-
-    def check_domain_target(self, domain_config, node_name, tunnel_info):
-        """检查域名是否指向正确的节点，返回是否匹配"""
-        try:
-            url = f"http://cf-v2.uapis.cn/get_free_subdomain_info"
-            params = {
-                "token": self.token,
-                "domain": domain_config['domain'],
-                "record": domain_config['record']
-            }
-
-            headers = get_headers()
-            response = requests.get(url, headers=headers, params=params)
-            data = response.json()
-
-            if data['code'] != 200:
-                self.logger.error(f"获取域名信息失败: {data.get('msg', '')}")
-                return False
-
-            # 获取当前节点信息
-            node_info = self.get_node_info(node_name)
-            if not node_info:
-                return False
-
-            # 计算预期的目标
-            expected_target = self.get_tunnel_target(tunnel_info, node_info)
-
-            # 检查当前目标是否匹配
-            current_target = data['data'].get('target', '')
-
-            match = current_target == expected_target
-            if not match:
-                self.logger.info(f"域名 {domain_config['record']}.{domain_config['domain']} 目标不匹配。"
-                                 f"当前: {current_target}, 预期: {expected_target}")
-
-            return match
-
-        except Exception as e:
-            self.logger.error(f"检查域名目标时发生错误: {str(e)}")
-            return False
 
     # 添加节点上线检测
     def check_new_nodes(self):
@@ -3900,17 +3810,14 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "提示", "这个隧道还没启动过哦！")
                 return
 
-            # Create new dialog if needed
             if not self.tunnel_outputs[tunnel_name]['dialog']:
                 self.tunnel_outputs[tunnel_name]['dialog'] = OutputDialog(self)
 
             dialog = self.tunnel_outputs[tunnel_name]['dialog']
             current_run = self.tunnel_outputs[tunnel_name]['run_number']
 
-            # Make a copy of the output to avoid thread issues
             output_text = self.tunnel_outputs[tunnel_name]['output']
 
-        # Now safely add the output and show the dialog (outside the mutex lock)
         dialog.add_output(tunnel_name, output_text, current_run)
         dialog.setWindowTitle(f"隧道 {tunnel_name} 运行输出")
         dialog.show()
@@ -4524,7 +4431,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
     def _start_tunnel_process(self, tunnel_info):
         """内部方法，启动隧道进程"""
         with self.process_lock:
-            # Check if tunnel is already running
             if tunnel_info['name'] in self.tunnel_processes:
                 self.logger.warning(f"隧道 {tunnel_info['name']} 已在运行")
                 return
@@ -4547,13 +4453,10 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                 self.tunnel_processes[tunnel_info['name']] = process
                 self.logger.info(f"隧道 {tunnel_info['name']} 启动成功")
 
-                # Start output capture - only pass the required number of arguments
                 self.capture_output(tunnel_info['name'], process)
 
-                # Update UI status
                 self.update_tunnel_card_status(tunnel_info['name'], True)
 
-                # Start status check with shorter interval
                 self.start_frequent_tunnel_monitor(tunnel_info['name'])
 
                 self.send_notification("tunnel_start",
@@ -4588,27 +4491,21 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                 self.update_tunnel_card_status(tunnel_name, False)
                 return
 
-            # Get the process
             process = self.tunnel_processes[tunnel_name]
 
-            # Check if process is still running
             if process.poll() is not None:
-                # Process has exited
                 exit_code = process.returncode
                 self.logger.info(f"隧道 {tunnel_name} 已停止运行, 退出代码: {exit_code}")
 
-                # Add specific error message for common error codes
                 error_message = f"进程退出，退出代码: {exit_code}"
                 if exit_code == -1073741819:  # 0xC0000005
                     error_message += " (内存访问冲突, 可能是由于节点离线或网络问题)"
 
-                # Update the output display
                 with QMutexLocker(self.output_mutex):
                     if tunnel_name in self.tunnel_outputs:
                         self.tunnel_outputs[tunnel_name][
                             'output'] += f"<br><span style='color: red;'>[E] {error_message}</span><br>"
 
-                        # Update dialog if open
                         if (self.tunnel_outputs[tunnel_name]['dialog'] and
                                 not self.tunnel_outputs[tunnel_name]['dialog'].isHidden()):
                             dialog = self.tunnel_outputs[tunnel_name]['dialog']
@@ -4616,22 +4513,17 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                             run_number = self.tunnel_outputs[tunnel_name]['run_number']
                             dialog.add_output(tunnel_name, output, run_number)
 
-                # Clean up
                 with self.process_lock:
                     if tunnel_name in self.tunnel_processes:
                         del self.tunnel_processes[tunnel_name]
 
-                # Update UI
                 self.update_tunnel_card_status(tunnel_name, False)
 
-                # Stop the timer
                 timer.stop()
                 self.tunnel_monitor_timers.pop(tunnel_name, None)
 
-                # Refresh the tunnels list to show the most current status
                 QTimer.singleShot(100, self.load_tunnels)
 
-                # Send notification
                 self.send_notification("tunnel_offline",
                                        f"隧道 {tunnel_name} 异常停止\n"
                                        f"退出代码: {exit_code}\n"
@@ -4640,7 +4532,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
         except Exception as e:
             self.logger.error(f"高频监控隧道状态失败: {str(e)}")
-            # Stop the timer to prevent further errors
             timer.stop()
             self.tunnel_monitor_timers.pop(tunnel_name, None)
 
@@ -4944,7 +4835,8 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         dialog.raise_()
         dialog.activateWindow()
 
-    def render_html_with_colors(self, text):
+    @staticmethod
+    def render_html_with_colors(text):
         """将文本转换为HTML，处理ANSI颜色代码和日志级别"""
         # 首先处理日志级别的颜色
         text = re.sub(r'\[I\]', '<span style="color: green;">[I]</span>', text)
@@ -4984,25 +4876,21 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
         return None
 
-    def capture_output(self, tunnel_name, process, run_number=None):
+    def capture_output(self, tunnel_name, process):
         """捕获隧道进程的输出"""
         try:
-            # Setup output container if not exists
             if tunnel_name not in self.tunnel_outputs:
                 self.tunnel_outputs[tunnel_name] = {
                     'output': '',
-                    'run_number': 0,  # Start at 0, will be incremented below
+                    'run_number': 0,
                     'dialog': None,
-                    'outputs_history': {}  # Store history of outputs by run number
+                    'outputs_history': {}
                 }
 
-            # Always increment run number for a new capture
             current_run = self.tunnel_outputs[tunnel_name]['run_number'] + 1
             self.tunnel_outputs[tunnel_name]['run_number'] = current_run
 
-            # Initialize empty output for this run - important to start fresh
             self.tunnel_outputs[tunnel_name]['outputs_history'][current_run] = ''
-            # Reset current output to empty for new run
             self.tunnel_outputs[tunnel_name]['output'] = ''
 
             def update_output(line):
@@ -5011,31 +4899,22 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                         if tunnel_name in self.tunnel_outputs:
                             obfuscated_line = self.obfuscate_sensitive_data(line)
 
-                            # Format line with HTML, adding log level colors
                             formatted_line = self.render_html_with_colors(obfuscated_line) + "<br>"
 
-                            # Update current output
                             self.tunnel_outputs[tunnel_name]['output'] += formatted_line
 
-                            # Also update in history
                             if current_run in self.tunnel_outputs[tunnel_name]['outputs_history']:
                                 self.tunnel_outputs[tunnel_name]['outputs_history'][current_run] += formatted_line
 
-                            # Check for node offline messages
                             if ("node" in line.lower() and "offline" in line.lower()) or "节点离线" in line:
-                                # Get the tunnel info using the tunnel_name
                                 found_tunnel = self.find_tunnel_by_name(tunnel_name)
                                 if found_tunnel:
-                                    # Try to switch to backup node
                                     self.switch_to_backup_node(found_tunnel, process)
 
-                            # Update dialog if open - use signals instead of QMetaObject.invokeMethod
                             dialog = self.tunnel_outputs[tunnel_name]['dialog']
                             if dialog and not dialog.isHidden():
                                 try:
-                                    # Get a copy of the current output
                                     output_copy = self.tunnel_outputs[tunnel_name]['outputs_history'][current_run]
-                                    # Use signal to safely update the UI
                                     dialog.output_update_signal.emit(tunnel_name, output_copy, current_run)
                                 except Exception as content:
                                     self.logger.error(f"更新对话框时发生错误: {str(content)}")
@@ -5051,7 +4930,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                 except Exception as e:
                     self.logger.error(f"读取进程输出时发生错误: {str(e)}")
 
-            # Start threads to read stdout and stderr
             threading.Thread(
                 target=read_output,
                 args=(process.stdout, update_output),
@@ -5173,33 +5051,26 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
     def check_tunnel_status(self, tunnel_name):
         """检查隧道状态"""
         try:
-            # Check if the tunnel is still in our processes
             if tunnel_name not in self.tunnel_processes:
                 self.update_tunnel_card_status(tunnel_name, False)
                 return
 
-            # Get the process
             process = self.tunnel_processes[tunnel_name]
 
-            # Check if process is still running
             if process.poll() is not None:
-                # Process has exited
                 self.logger.info(f"隧道 {tunnel_name} 已停止, 退出代码: {process.returncode}")
 
-                # Clean up
                 with self.process_lock:
                     if tunnel_name in self.tunnel_processes:
                         del self.tunnel_processes[tunnel_name]
 
                 self.update_tunnel_card_status(tunnel_name, False)
 
-                # Send notification
                 self.send_notification("tunnel_stop",
                                        f"隧道 {tunnel_name} 已停止运行\n" +
                                        f"退出代码: {process.returncode}",
                                        tunnel_name)
             else:
-                # Process is still running, check again later
                 QTimer.singleShot(1000, lambda: self.check_tunnel_status(tunnel_name))
 
         except Exception as e:
