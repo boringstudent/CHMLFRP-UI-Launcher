@@ -742,19 +742,56 @@ class TunnelCard(QFrame):
             self.setStyleSheet(self.styleSheet().replace(
                 "TunnelCard { border: 2px solid #0066cc; background-color: rgba(224, 224, 224, 50); }", ""))
 
+
 class BatchEditDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.parent = parent
+        self.node_detail_text = None
+        self.force_update_checkbox = None
+        self.v1_api_radio = None
+        self.v2_api_radio = None
         self.setWindowTitle("批量编辑隧道")
-        self.layout = QVBoxLayout(self)
+        self.setMinimumWidth(750)  # 增加宽度以容纳更多内容
+        self.initUI()
+
+    def initUI(self):
+        # 使用水平布局
+        main_layout = QHBoxLayout(self)
+
+        # 左侧编辑区域
+        left_layout = QVBoxLayout()
+
+        # API版本选择
+        api_version_group = QGroupBox("API版本选择")
+        api_layout = QVBoxLayout()
+        self.v2_api_radio = QRadioButton("V2 API")
+        self.v1_api_radio = QRadioButton("V1 API（部分参数可能无法修改）")
+        api_layout.addWidget(self.v2_api_radio)
+        api_layout.addWidget(self.v1_api_radio)
+        api_version_group.setLayout(api_layout)
+        self.v2_api_radio.setChecked(True)  # 默认选择V2
+        left_layout.addWidget(api_version_group)
+
+        # 强制修改选项
+        self.force_update_checkbox = QCheckBox("强制修改（删除后重建）")
+        force_update_note = QLabel("注意：强制修改会先删除原隧道再创建新隧道，隧道ID会变更，且可能失败")
+        force_update_note.setStyleSheet("color: red; font-size: 10px;")
+        force_update_note.setWordWrap(True)
+        left_layout.addWidget(self.force_update_checkbox)
+        left_layout.addWidget(force_update_note)
+
+        form_layout = QFormLayout()
 
         self.node_combo = QComboBox()
         self.node_combo.addItem("不修改")
         self.node_combo.addItems([node['name'] for node in API.get_nodes()])
+        self.node_combo.currentIndexChanged.connect(self.on_node_changed)
 
         self.type_combo = QComboBox()
         self.type_combo.addItem("不修改")
         self.type_combo.addItems(["tcp", "udp", "http", "https"])
+        # 移除类型变化监听器，因为不再需要动态更新域名输入框
 
         self.local_ip_input = QLineEdit()
         self.local_ip_input.setPlaceholderText("不修改")
@@ -762,25 +799,82 @@ class BatchEditDialog(QDialog):
         self.local_port_input = QLineEdit()
         self.local_port_input.setPlaceholderText("不修改")
 
-        self.remote_port_input = QLineEdit()
-        self.remote_port_input.setPlaceholderText("不修改")
+        # 移除绑定域名/远程端口输入框，因为这些不能在批量编辑中修改
 
-        form_layout = QFormLayout()
+        # 加密和压缩选项
+        self.encryption_combo = QComboBox()
+        self.encryption_combo.addItems(["不修改", "开启", "关闭"])
+
+        self.compression_combo = QComboBox()
+        self.compression_combo.addItems(["不修改", "开启", "关闭"])
+
         form_layout.addRow("节点:", self.node_combo)
         form_layout.addRow("类型:", self.type_combo)
         form_layout.addRow("本地IP/主机名:", self.local_ip_input)
         form_layout.addRow("本地端口:", self.local_port_input)
-        form_layout.addRow("远程端口:", self.remote_port_input)
 
-        self.layout.addLayout(form_layout)
+        # 添加提示说明
+        port_domain_note = QLabel("注意：TCP/UDP的远程端口和HTTP/HTTPS的绑定域名在批量编辑中将保持原值")
+        port_domain_note.setStyleSheet("color: #FF6600; font-size: 10px;")
+        port_domain_note.setWordWrap(True)
+        form_layout.addRow(port_domain_note)
+        form_layout.addRow("加密:", self.encryption_combo)
+        form_layout.addRow("压缩:", self.compression_combo)
+
+        left_layout.addLayout(form_layout)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        self.layout.addWidget(buttons)
+        left_layout.addWidget(buttons)
+
+        # 右侧节点详情区域
+        right_layout = QVBoxLayout()
+        detail_label = QLabel("节点详细信息")
+        self.node_detail_text = QTextEdit()
+        self.node_detail_text.setReadOnly(True)
+        self.node_detail_text.setMinimumWidth(300)
+        right_layout.addWidget(detail_label)
+        right_layout.addWidget(self.node_detail_text)
+
+        # 将两部分添加到主布局
+        main_layout.addLayout(left_layout)
+        main_layout.addLayout(right_layout)
+
+        # 初始化节点详情
+        self.on_node_changed(self.node_combo.currentIndex())
+
+    def on_node_changed(self, index):
+        """当节点选择变化时更新节点详情"""
+        if index == 0:
+            # "不修改"选项
+            self.node_detail_text.clear()
+            return
+
+        node_name = self.node_combo.itemText(index)
+        nodes = API.get_nodes()
+
+        for node in nodes:
+            if node['name'] == node_name:
+                detail_text = f"""
+节点名称: {node['name']}
+节点地址: {node['area']}
+权限组: {node['nodegroup']}
+是否属于大陆带宽节点: {'是' if node['china'] == 'true' else '否'}
+是否支持web: {'支持' if node['web'] == 'true' else '不支持'}
+是否支持udp: {'支持' if node['udp'] == 'true' else '不支持'} 
+是否有防御: {'有' if node['fangyu'] == 'true' else '无'}
+节点介绍: {node['notes']}
+"""
+                self.node_detail_text.setPlainText(detail_text)
+                break
+
+    # 移除on_type_changed方法，因为不再需要动态更新域名输入框
 
     def get_changes(self):
         changes = {}
+
+        # 获取基本信息
         if self.node_combo.currentIndex() != 0:
             changes['node'] = self.node_combo.currentText()
         if self.type_combo.currentIndex() != 0:
@@ -789,8 +883,18 @@ class BatchEditDialog(QDialog):
             changes['localip'] = self.local_ip_input.text()
         if self.local_port_input.text():
             changes['nport'] = self.local_port_input.text()
-        if self.remote_port_input.text():
-            changes['dorp'] = self.remote_port_input.text()
+        # 不再收集远程端口/绑定域名的更改
+
+        # 加密和压缩
+        if self.encryption_combo.currentIndex() != 0:
+            changes['encryption'] = (self.encryption_combo.currentText() == "开启")
+        if self.compression_combo.currentIndex() != 0:
+            changes['compression'] = (self.compression_combo.currentText() == "开启")
+
+        # API版本和强制修改标志
+        changes['use_v1_api'] = self.v1_api_radio.isChecked()
+        changes['force_update'] = self.force_update_checkbox.isChecked()
+
         return changes
 
 class DomainCard(QFrame):
@@ -2113,6 +2217,576 @@ class NodeCard(QFrame):
             self.clicked.emit(self.node_info)
         super().mousePressEvent(event)
 
+
+class BackupNodeManager:
+    """管理隧道的备用节点配置"""
+
+    def __init__(self, main_window):
+        self.main_window = main_window
+        self.config_file = self.get_config_path()
+        self.backup_configs = self.load_configs()
+
+    def get_config_path(self):
+        """获取备用节点配置文件路径"""
+        return os.path.abspath(os.path.join(os.path.split(sys.argv[0])[0], "backup_nodes.json"))
+
+    def load_configs(self):
+        """加载备用节点配置"""
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                self.main_window.logger.error(f"加载备用节点配置失败: {str(e)}")
+                return {}
+        return {}
+
+    def save_configs(self):
+        """保存备用节点配置"""
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.backup_configs, f, indent=4, ensure_ascii=False)
+            return True
+        except Exception as e:
+            self.main_window.logger.error(f"保存备用节点配置失败: {str(e)}")
+            return False
+
+    def get_backup_nodes(self, tunnel_id):
+        """获取隧道的备用节点列表"""
+        tunnel_id = str(tunnel_id)  # 确保是字符串
+        if tunnel_id in self.backup_configs:
+            return self.backup_configs[tunnel_id].get('backup_nodes', [])
+        return []
+
+    def get_backup_domain(self, tunnel_id):
+        """获取隧道绑定的备用域名"""
+        tunnel_id = str(tunnel_id)
+        if tunnel_id in self.backup_configs:
+            return self.backup_configs[tunnel_id].get('domain', None)
+        return None
+
+    def set_backup_config(self, tunnel_id, backup_nodes=None, domain=None):
+        """设置隧道的备用配置"""
+        tunnel_id = str(tunnel_id)
+
+        if tunnel_id not in self.backup_configs:
+            self.backup_configs[tunnel_id] = {}
+
+        if backup_nodes is not None:
+            self.backup_configs[tunnel_id]['backup_nodes'] = backup_nodes
+
+        if domain is not None:
+            self.backup_configs[tunnel_id]['domain'] = domain
+
+        return self.save_configs()
+
+    def remove_backup_config(self, tunnel_id):
+        """移除隧道的备用配置"""
+        tunnel_id = str(tunnel_id)
+        if tunnel_id in self.backup_configs:
+            del self.backup_configs[tunnel_id]
+            return self.save_configs()
+        return True
+
+
+def create_backup_node_dialog(main_window, tunnel_info=None):
+    """创建备用节点配置对话框"""
+    dialog = QDialog(main_window)
+    dialog.setWindowTitle("备用节点配置")
+    dialog.setFixedWidth(600)
+    layout = QVBoxLayout(dialog)
+
+    # 隧道信息
+    if tunnel_info:
+        info_label = QLabel(f"为隧道 <b>{tunnel_info['name']}</b> 配置备用节点")
+    else:
+        info_label = QLabel("请选择一个隧道进行配置")
+    layout.addWidget(info_label)
+
+    # 节点选择区域
+    node_group = QGroupBox("备用节点选择")
+    node_layout = QVBoxLayout()
+
+    # 获取所有节点
+    nodes = API.get_nodes()
+    backup_manager = main_window.backup_node_manager
+
+    # 创建节点选择列表
+    node_list = QListWidget()
+    node_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+
+    # 当前已选的备用节点
+    selected_backup_nodes = []
+    if tunnel_info:
+        selected_backup_nodes = backup_manager.get_backup_nodes(tunnel_info['id'])
+
+    # 填充节点列表
+    for node in nodes:
+        if tunnel_info and node['name'] == tunnel_info['node']:
+            continue  # 跳过当前节点
+
+        item = QListWidgetItem(f"{node['name']} ({node['area']})")
+        item.setData(Qt.ItemDataRole.UserRole, node['name'])
+        node_list.setItemSelected(item, node['name'] in selected_backup_nodes)
+        node_list.addItem(item)
+
+    node_layout.addWidget(QLabel("选择备用节点(可多选):"))
+    node_layout.addWidget(node_list)
+    node_group.setLayout(node_layout)
+    layout.addWidget(node_group)
+
+    # 域名配置区域
+    domain_group = QGroupBox("备用域名配置")
+    domain_layout = QVBoxLayout()
+
+    use_domain_checkbox = QCheckBox("为此隧道配置备用域名")
+    domain_layout.addWidget(use_domain_checkbox)
+
+    domain_stack = QStackedWidget()
+
+    # 选择已有域名的页面
+    existing_domain_page = QWidget()
+    existing_layout = QVBoxLayout(existing_domain_page)
+    domain_combo = QComboBox()
+    domain_combo.addItem("选择已有域名...", None)
+
+    # 加载用户的域名
+    try:
+        url = f"http://cf-v2.uapis.cn/get_user_free_subdomains"
+        params = {"token": main_window.token}
+        headers = get_headers()
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if data['code'] == 200:
+                for domain in data['data']:
+                    # 显示完整域名
+                    full_domain = f"{domain['record']}.{domain['domain']}"
+                    domain_combo.addItem(full_domain, domain)
+    except Exception as e:
+        main_window.logger.error(f"加载域名列表失败: {str(e)}")
+
+    existing_layout.addWidget(QLabel("选择已有域名:"))
+    existing_layout.addWidget(domain_combo)
+
+    # 创建新域名的页面
+    new_domain_page = QWidget()
+    new_layout = QVBoxLayout(new_domain_page)
+
+    main_domain_combo = QComboBox()
+    main_window.load_main_domains(main_domain_combo)
+    record_input = QLineEdit()
+    record_input.setPlaceholderText("输入子域名前缀")
+
+    new_layout.addWidget(QLabel("主域名:"))
+    new_layout.addWidget(main_domain_combo)
+    new_layout.addWidget(QLabel("子域名:"))
+    new_layout.addWidget(record_input)
+
+    # 添加页面到堆栈
+    domain_stack.addWidget(existing_domain_page)
+    domain_stack.addWidget(new_domain_page)
+
+    # 切换按钮
+    btn_layout = QHBoxLayout()
+    use_existing_btn = QRadioButton("使用已有域名")
+    create_new_btn = QRadioButton("创建新域名")
+    use_existing_btn.setChecked(True)
+    btn_layout.addWidget(use_existing_btn)
+    btn_layout.addWidget(create_new_btn)
+
+    domain_layout.addLayout(btn_layout)
+    domain_layout.addWidget(domain_stack)
+
+    # 连接信号
+    def on_domain_checkbox_changed(state):
+        domain_stack.setEnabled(state == Qt.CheckState.Checked)
+        use_existing_btn.setEnabled(state == Qt.CheckState.Checked)
+        create_new_btn.setEnabled(state == Qt.CheckState.Checked)
+
+    use_domain_checkbox.stateChanged.connect(on_domain_checkbox_changed)
+
+    def on_domain_type_changed():
+        if use_existing_btn.isChecked():
+            domain_stack.setCurrentIndex(0)
+        else:
+            domain_stack.setCurrentIndex(1)
+
+    use_existing_btn.toggled.connect(on_domain_type_changed)
+
+    # 设置当前的域名配置
+    if tunnel_info:
+        saved_domain = backup_manager.get_backup_domain(tunnel_info['id'])
+        if saved_domain:
+            use_domain_checkbox.setChecked(True)
+            # 尝试在下拉框中找到保存的域名
+            for i in range(domain_combo.count()):
+                if domain_combo.itemText(i) == saved_domain:
+                    domain_combo.setCurrentIndex(i)
+                    break
+        else:
+            use_domain_checkbox.setChecked(False)
+    else:
+        use_domain_checkbox.setChecked(False)
+
+    # 初始状态
+    on_domain_checkbox_changed(
+        Qt.CheckState.Unchecked if not use_domain_checkbox.isChecked() else Qt.CheckState.Checked)
+
+    domain_group.setLayout(domain_layout)
+    layout.addWidget(domain_group)
+
+    # 按钮区域
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+
+    # 添加删除配置按钮
+    if tunnel_info and str(tunnel_info['id']) in backup_manager.backup_configs:
+        delete_button = QPushButton("删除配置")
+        delete_button.setStyleSheet("background-color: #d9534f; color: white;")
+        buttons.addButton(delete_button, QDialogButtonBox.ButtonRole.DestructiveRole)
+
+        def on_delete_clicked():
+            reply = QMessageBox.question(
+                dialog,
+                "确认删除",
+                f"确定要删除隧道 '{tunnel_info['name']}' 的备用节点配置吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                backup_manager.remove_backup_config(tunnel_info['id'])
+                dialog.accept()
+
+        delete_button.clicked.connect(on_delete_clicked)
+
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+
+    if dialog.exec() == QDialog.DialogCode.Accepted and tunnel_info:
+        # 收集所选节点
+        selected_nodes = []
+        for i in range(node_list.count()):
+            item = node_list.item(i)
+            if item.isSelected():
+                selected_nodes.append(item.data(Qt.ItemDataRole.UserRole))
+
+        # 收集域名信息
+        domain = None
+        if use_domain_checkbox.isChecked():
+            if use_existing_btn.isChecked():
+                # 使用已有域名
+                if domain_combo.currentIndex() > 0:
+                    domain = domain_combo.currentText()
+            else:
+                # 创建新域名
+                if record_input.text() and main_domain_combo.currentText():
+                    # 创建新域名
+                    try:
+                        url = "http://cf-v2.uapis.cn/create_free_subdomain"
+                        payload = {
+                            "token": main_window.token,
+                            "domain": main_domain_combo.currentText(),
+                            "record": record_input.text(),
+                            "type": "CNAME",
+                            "ttl": "1分钟",
+                            "target": f"{tunnel_info['node']}:{tunnel_info['dorp']}",
+                            "remarks": f"隧道 {tunnel_info['name']} 的备用域名"
+                        }
+
+                        headers = get_headers(request_json=True)
+                        response = requests.post(url, headers=headers, json=payload)
+                        if response.status_code == 200:
+                            response_data = response.json()
+                            if response_data['code'] == 200:
+                                domain = f"{record_input.text()}.{main_domain_combo.currentText()}"
+                                main_window.logger.info(f"为隧道 {tunnel_info['name']} 创建备用域名成功: {domain}")
+                            else:
+                                QMessageBox.warning(dialog, "创建域名失败", response_data.get('msg', '未知错误'))
+                        else:
+                            QMessageBox.warning(dialog, "创建域名失败", f"请求失败: {response.status_code}")
+                    except Exception as e:
+                        main_window.logger.error(f"创建域名失败: {str(e)}")
+                        QMessageBox.warning(dialog, "创建域名失败", str(e))
+
+        # 保存配置
+        if selected_nodes or domain:
+            backup_manager.set_backup_config(tunnel_info['id'], selected_nodes, domain)
+            return True
+        else:
+            # 用户没有选择任何备用节点也没有设置域名，删除配置
+            backup_manager.remove_backup_config(tunnel_info['id'])
+            return True
+
+    return False
+
+
+# 更新MainWindow类的start_tunnel方法，添加备用节点切换逻辑
+def enhanced_start_tunnel(self, tunnel_info):
+    """增强版的启动隧道方法，支持备用节点切换"""
+    try:
+        # 检查主节点状态
+        primary_node = tunnel_info['node']
+        primary_node_online = API.is_node_online(primary_node, tyen="online")
+
+        # 获取备用节点配置
+        backup_nodes = self.backup_node_manager.get_backup_nodes(tunnel_info['id'])
+        current_node = primary_node
+
+        # 如果主节点离线，尝试切换到备用节点
+        if not primary_node_online and backup_nodes:
+            self.logger.warning(f"主节点 {primary_node} 离线，尝试使用备用节点")
+
+            # 查找在线的备用节点
+            for node in backup_nodes:
+                if API.is_node_online(node, tyen="online"):
+                    # 找到在线的备用节点
+                    self.logger.info(f"找到可用的备用节点: {node}")
+                    current_node = node
+
+                    # 暂时更改隧道配置
+                    temp_tunnel_info = tunnel_info.copy()
+                    temp_tunnel_info['node'] = current_node
+                    tunnel_info = temp_tunnel_info
+
+                    # 更新域名解析(如果有配置域名)
+                    backup_domain = self.backup_node_manager.get_backup_domain(tunnel_info['id'])
+                    if backup_domain:
+                        self.update_domain_for_backup(backup_domain, current_node, tunnel_info)
+
+                    break
+            else:
+                # 所有备用节点也离线
+                self.logger.warning(f"所有备用节点也离线，无法启动隧道 {tunnel_info['name']}")
+                QMessageBox.warning(self, "警告", f"节点 {primary_node} 及所有备用节点都离线，无法启动隧道")
+                return
+
+        # 节点在线或已切换到备用节点，继续正常启动流程
+        with self.process_lock:
+            # 检查隧道是否已启动
+            if tunnel_info['name'] in self.tunnel_processes:
+                self.logger.warning(f"隧道 {tunnel_info['name']} 已在运行")
+                return
+
+            try:
+                frpc_path = get_absolute_path("frpc.exe")
+                cmd = [
+                    frpc_path,
+                    "-u", self.token,
+                    "-p", str(tunnel_info['id'])
+                ]
+
+                # 如果使用备用节点，添加节点参数
+                if current_node != primary_node:
+                    cmd.extend(["-n", current_node])
+
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+
+                self.tunnel_processes[tunnel_info['name']] = process
+                self.logger.info(f"隧道 {tunnel_info['name']} 启动成功" +
+                                 (f" (使用备用节点: {current_node})" if current_node != primary_node else ""))
+
+                # 启动输出捕获
+                self.capture_output(tunnel_info['name'], process)
+
+                # 更新UI状态
+                self.update_tunnel_card_status(tunnel_info['name'], True)
+
+                # 启动状态检查
+                QTimer.singleShot(100, lambda: self.check_tunnel_status(tunnel_info['name']))
+
+                # 发送通知
+                self.send_notification(
+                    "tunnel_start",
+                    f"隧道 {tunnel_info['name']} 已成功启动\n" +
+                    f"节点：{current_node}" +
+                    (f" (备用节点)" if current_node != primary_node else ""),
+                    tunnel_info['name']
+                )
+
+            except Exception as e:
+                self.logger.error(f"启动隧道失败: {str(e)}")
+                raise
+
+    except Exception as e:
+        self.logger.error(f"启动隧道时发生错误: {str(e)}")
+        QMessageBox.warning(self, "错误", f"启动隧道失败: {str(e)}")
+
+
+def update_domain_for_backup(self, domain, node, tunnel_info):
+    """更新备用域名指向新节点"""
+    try:
+        # 解析域名部分
+        if '.' in domain:
+            parts = domain.split('.', 1)
+            if len(parts) == 2:
+                record, main_domain = parts
+
+                # 构建新的目标
+                new_target = ""
+                if tunnel_info['type'].lower() in ['http', 'https']:
+                    # 对于HTTP/HTTPS隧道，CNAME记录指向节点域名
+                    new_target = f"{node}"
+                else:
+                    # 对于TCP/UDP隧道，CNAME记录指向节点域名:端口
+                    new_target = f"{node}:{tunnel_info['dorp']}"
+
+                # 更新域名解析
+                url = "http://cf-v2.uapis.cn/update_free_subdomain"
+                payload = {
+                    "token": self.token,
+                    "domain": main_domain,
+                    "record": record,
+                    "type": "CNAME",
+                    "ttl": "1分钟",  # 使用最短TTL便于快速生效
+                    "target": new_target,
+                    "remarks": f"隧道 {tunnel_info['name']} 的备用域名 (自动更新)"
+                }
+
+                headers = get_headers(request_json=True)
+                response = requests.post(url, headers=headers, json=payload)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data['code'] == 200:
+                        self.logger.info(f"已更新域名 {domain} 指向备用节点 {node}")
+                    else:
+                        self.logger.error(f"更新域名失败: {data.get('msg', '未知错误')}")
+                else:
+                    self.logger.error(f"更新域名请求失败: {response.status_code}")
+        else:
+            self.logger.error(f"无效的域名格式: {domain}")
+    except Exception as e:
+        self.logger.error(f"更新备用域名时发生错误: {str(e)}")
+
+
+# 修改隧道输出监控，以检测节点离线并自动切换到备用节点
+def enhanced_capture_output(self, tunnel_name, process):
+    def read_output(pipe, callback):
+        try:
+            for line in iter(pipe.readline, b''):
+                if not process.poll() is None:  # 检查进程是否已结束
+                    break
+                try:
+                    decoded_line = line.decode()
+                    callback(decoded_line)
+
+                    # 检查节点离线信息并尝试切换到备用节点
+                    if "节点离线" in decoded_line or ("节点" in decoded_line and "离线" in decoded_line):
+                        # 在主线程中处理备用节点切换
+                        QMetaObject.invokeMethod(self, "handle_node_offline",
+                                                 Qt.ConnectionType.QueuedConnection,
+                                                 Q_ARG(str, tunnel_name))
+                except Exception as content:
+                    self.logger.error(f"处理输出时发生错误: {str(content)}")
+        except Exception as content:
+            self.logger.error(f"读取输出时发生错误: {str(content)}")
+        finally:
+            try:
+                pipe.close()
+            except Exception as content:
+                self.logger.error(f"关闭管道时发生错误: {str(content)}")
+
+    def update_output(line):
+        try:
+            with QMutexLocker(self.output_mutex):
+                if tunnel_name in self.tunnel_outputs:
+                    obfuscated_line = self.obfuscate_sensitive_data(line)
+                    self.tunnel_outputs[tunnel_name]['output'] += self.render_html(obfuscated_line)
+
+                    if (self.tunnel_outputs[tunnel_name]['dialog'] and
+                            not self.tunnel_outputs[tunnel_name]['dialog'].isHidden()):
+                        try:
+                            self.tunnel_outputs[tunnel_name]['dialog'].add_output(
+                                tunnel_name,
+                                self.tunnel_outputs[tunnel_name]['output'],
+                                self.tunnel_outputs[tunnel_name]['run_number']
+                            )
+                        except Exception as content:
+                            self.logger.error(f"更新对话框时发生错误: {str(content)}")
+        except Exception as content:
+            self.logger.error(f"更新输出时发生错误: {str(content)}")
+
+    # 初始化输出互斥锁
+    if not hasattr(self, 'output_mutex'):
+        self.output_mutex = QMutex()
+
+    with QMutexLocker(self.output_mutex):
+        self.tunnel_outputs[tunnel_name] = {
+            'output': '',
+            'run_number': self.tunnel_outputs.get(tunnel_name, {}).get('run_number', 0) + 1,
+            'dialog': None,
+            'process': process
+        }
+
+    # 创建并启动输出读取线程
+    stdout_thread = threading.Thread(target=read_output, args=(process.stdout, update_output), daemon=True)
+    stderr_thread = threading.Thread(target=read_output, args=(process.stderr, update_output), daemon=True)
+
+    stdout_thread.start()
+    stderr_thread.start()
+
+    # 启动进程监控
+    monitor_thread = threading.Thread(target=self.monitor_process,
+                                      args=(tunnel_name, process, stdout_thread, stderr_thread),
+                                      daemon=True)
+    monitor_thread.start()
+
+
+# 处理节点离线的槽函数
+@pyqtSlot(str)
+def handle_node_offline(self, tunnel_name):
+    """处理节点离线事件，尝试切换到备用节点"""
+    try:
+        # 获取隧道信息
+        tunnels = API.get_user_tunnels(self.token)
+        tunnel_info = None
+        for tunnel in tunnels:
+            if tunnel['name'] == tunnel_name:
+                tunnel_info = tunnel
+                break
+
+        if not tunnel_info:
+            self.logger.error(f"无法找到隧道 {tunnel_name} 的信息")
+            return
+
+        # 首先停止当前隧道
+        self.stop_tunnel({"name": tunnel_name})
+
+        # 获取备用节点
+        backup_nodes = self.backup_node_manager.get_backup_nodes(tunnel_info['id'])
+        if not backup_nodes:
+            self.logger.warning(f"隧道 {tunnel_name} 没有配置备用节点，无法自动切换")
+            return
+
+        # 尝试查找在线的备用节点
+        for node in backup_nodes:
+            if API.is_node_online(node, tyen="online"):
+                self.logger.info(f"找到可用的备用节点: {node}，正在切换")
+
+                # 创建临时隧道信息
+                temp_tunnel_info = tunnel_info.copy()
+                temp_tunnel_info['node'] = node
+
+                # 更新域名解析(如果有配置域名)
+                backup_domain = self.backup_node_manager.get_backup_domain(tunnel_info['id'])
+                if backup_domain:
+                    self.update_domain_for_backup(backup_domain, node, temp_tunnel_info)
+
+                # 启动使用备用节点的隧道
+                QTimer.singleShot(1000, lambda: self.start_tunnel(temp_tunnel_info))
+                return
+
+        # 所有备用节点也离线
+        self.logger.warning(f"所有备用节点也离线，无法重启隧道 {tunnel_name}")
+        QMessageBox.warning(self, "警告", f"主节点和所有备用节点都离线，无法重启隧道 {tunnel_name}")
+    except Exception as e:
+        self.logger.error(f"处理节点离线时发生错误: {str(e)}")
+
 class MainWindow(QMainWindow):
     """主窗口"""
     def __init__(self):
@@ -2552,44 +3226,63 @@ class MainWindow(QMainWindow):
 
             for tunnel_info in self.selected_tunnels:
                 try:
-                    url = "http://cf-v2.uapis.cn/update_tunnel"
+                    tunnel_type = changes.get("type", tunnel_info["type"])
+
+                    # 构建基本请求负载
                     payload = {
                         "tunnelid": int(tunnel_info["id"]),
                         "token": self.token,
                         "tunnelname": tunnel_info["name"],
                         "node": changes.get("node", tunnel_info["node"]),
-                        "localip": tunnel_info["localip"],
-                        "porttype": changes.get("type", tunnel_info["type"]),
+                        "localip": changes.get("localip", tunnel_info["localip"]),
+                        "porttype": tunnel_type,
                         "localport": tunnel_info["nport"],
-                        "remoteport": tunnel_info["dorp"],
-                        "encryption": tunnel_info["encryption"],
-                        "compression": tunnel_info["compression"]
+                        "encryption": changes.get("encryption", tunnel_info["encryption"]),
+                        "compression": changes.get("compression", tunnel_info["compression"])
                     }
 
                     # 验证本地端口是否有效
                     if "nport" in changes:
-                        if not enter_inspector.validate_port(tunnel_info["nport"],True):
+                        if not enter_inspector.validate_port(changes["nport"], True):
                             raise ValueError(f"隧道 '{tunnel_info['name']}': 本地端口必须是1-65535之间的整数")
                         payload["localport"] = int(changes["nport"])
 
-                    # 验证远程端口是否有效
-                    if "dorp" in changes:
-                        if not enter_inspector.validate_port(tunnel_info["dorp"],False):
-                            raise ValueError(f"隧道 '{tunnel_info['name']}': 远程端口必须是10000-65535之间的整数")
-                        payload["remoteport"] = int(changes["dorp"])
-
-                    headers = get_headers(request_json=True)
-                    response = requests.post(url, headers=headers, json=payload)
-                    if response.status_code == 200:
-                        self.logger.info(f"隧道 {tunnel_info['name']} 更新成功")
+                    # 根据隧道类型设置正确的远程端口/绑定域名参数
+                    if tunnel_type.lower() in ["tcp", "udp"]:
+                        # TCP/UDP类型使用remoteport参数
+                        try:
+                            payload["remoteport"] = int(tunnel_info["dorp"])
+                        except (ValueError, TypeError):
+                            raise ValueError(f"隧道 '{tunnel_info['name']}': 远程端口必须是整数")
                     else:
-                        self.logger.error(f"更新隧道 {tunnel_info['name']} 失败: {response.text}")
-                except ValueError as ve:
-                    self.logger.error(str(ve))
-                    QMessageBox.warning(self, "错误", str(ve))
-                except Exception as content:
+                        # HTTP/HTTPS类型使用banddomain参数
+                        payload["banddomain"] = tunnel_info["dorp"]
+
+                    # 添加调试日志
+                    self.logger.info(
+                        f"正在更新隧道 '{tunnel_info['name']}' (ID: {tunnel_info['id']}，类型: {tunnel_type})")
+
+                    # 发送请求
+                    headers = get_headers(request_json=True)
+                    url = "http://cf-v2.uapis.cn/update_tunnel"
+                    response = requests.post(url, headers=headers, json=payload)
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get('code') == 200:
+                            self.logger.info(f"隧道 {tunnel_info['name']} 更新成功")
+                        else:
+                            self.logger.error(f"更新隧道 {tunnel_info['name']} 失败: {result.get('msg', '未知错误')}")
+                            QMessageBox.warning(self, "错误",
+                                                f"更新隧道 {tunnel_info['name']} 失败: {result.get('msg', '未知错误')}")
+                    else:
+                        self.logger.error(f"更新隧道 {tunnel_info['name']} 失败: HTTP {response.status_code}")
+                        QMessageBox.warning(self, "错误",
+                                            f"更新隧道 {tunnel_info['name']} 失败: HTTP {response.status_code}")
+
+                except Exception as e:
                     self.logger.exception(f"更新隧道 {tunnel_info['name']} 时发生错误")
-                    QMessageBox.warning(self, "错误", f"更新隧道 {tunnel_info['name']} 失败: {str(content)}")
+                    QMessageBox.warning(self, "错误", f"更新隧道 {tunnel_info['name']} 失败: {str(e)}")
 
             self.load_tunnels()  # 刷新隧道列表
             QMessageBox.information(self, "成功", "批量编辑完成")
