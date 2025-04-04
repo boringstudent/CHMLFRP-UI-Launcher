@@ -3801,17 +3801,27 @@ class MainWindow(QMainWindow):
         self.token_input = QLineEdit(self)
         self.token_input.setPlaceholderText('Token (可选 仅填时为token登录)')
         self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
+
         self.login_button = QPushButton('登录', self)
         self.login_button.clicked.connect(self.login)
         self.logout_button = QPushButton('退出登录', self)
         self.logout_button.clicked.connect(self.logout)
         self.logout_button.setEnabled(False)
 
+        # 添加查看消息按钮
+        self.messages_button = QPushButton('系统消息', self)
+        self.messages_button.clicked.connect(self.show_messages)
+        self.messages_button.setIcon(QIcon.fromTheme("mail-message"))
+
+        login_layout = QHBoxLayout()
+        login_layout.addWidget(self.login_button)
+        login_layout.addWidget(self.logout_button)
+        login_layout.addWidget(self.messages_button)
+
         layout.addWidget(self.username_input)
         layout.addWidget(self.password_input)
         layout.addWidget(self.token_input)
-        layout.addWidget(self.login_button)
-        layout.addWidget(self.logout_button)
+        layout.addLayout(login_layout)
 
         self.user_info_display = QTextEdit()
         self.user_info_display.setReadOnly(True)
@@ -3820,6 +3830,51 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
 
         self.content_stack.addWidget(user_info_widget)
+
+    def show_messages(self):
+        """显示系统消息对话框"""
+        dialog = MessageDialog(self.token, self)
+        if hasattr(self, 'dark_theme'):
+            dialog.apply_theme(self.dark_theme)
+        dialog.exec()
+
+    def auto_check_messages(self):
+        """自动检查是否有未读消息"""
+        if not self.token:
+            return
+
+        try:
+            url = "http://cf-v2.uapis.cn/messages"
+            params = {"token": self.token}
+            headers = get_headers()
+
+            response = requests.get(url, headers=headers, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                if data['code'] == 200:
+                    messages = data.get('data', [])
+
+                    # 检查是否有个人消息
+                    personal_messages = [m for m in messages if m.get('quanti') == 'no']
+                    if personal_messages:
+                        QTimer.singleShot(3000, lambda: self.show_message_notification(len(personal_messages)))
+        except Exception as e:
+            self.logger.error(f"检查消息时发生错误: {str(e)}")
+
+    def show_message_notification(self, count):
+        """显示消息通知"""
+        notification = QMessageBox(self)
+        notification.setWindowTitle("新消息提醒")
+        notification.setText(f"您有 {count} 条未读个人消息，请及时查看。")
+        notification.setIcon(QMessageBox.Icon.Information)
+
+        view_button = notification.addButton("查看消息", QMessageBox.ButtonRole.AcceptRole)
+        ignore_button = notification.addButton("稍后查看", QMessageBox.ButtonRole.RejectRole)
+
+        notification.exec()
+
+        if notification.clickedButton() == view_button:
+            self.show_messages()
 
     def on_tunnel_clicked(self, tunnel_info, is_selected):
         if is_selected:
@@ -4574,6 +4629,10 @@ class MainWindow(QMainWindow):
             self.token_input.setEnabled(False)
             self.load_user_data()
             self.auto_start_tunnels()
+
+            # 添加自动检查消息
+            QTimer.singleShot(2000, self.auto_check_messages)
+
         except Exception as content:
             self.logger.error(f"登录成功后操作失败: {str(content)}")
             self.logger.error(traceback.format_exc())
@@ -6534,6 +6593,147 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                 self.logger.info(f"隧道 '{tunnel_name}' 已停止")
             else:
                 self.logger.warning(f"尝试停止不存在的隧道: {tunnel_name}")
+
+class MessageDialog(QDialog):
+    """消息对话框，用于显示服务器消息"""
+
+    def __init__(self, token=None, parent=None):
+        super().__init__(parent)
+        self.token = token
+        self.parent = parent
+        self.setWindowTitle("系统消息")
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(400)
+        self.init_ui()
+        self.load_messages()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # 消息列表
+        self.message_list = QListWidget()
+        self.message_list.setAlternatingRowColors(True)
+        self.message_list.itemClicked.connect(self.show_message_detail)
+        layout.addWidget(self.message_list)
+
+        # 消息详情
+        self.message_detail = QTextEdit()
+        self.message_detail.setReadOnly(True)
+        layout.addWidget(self.message_detail)
+
+        # 刷新按钮
+        refresh_button = QPushButton("刷新消息")
+        refresh_button.clicked.connect(self.load_messages)
+
+        # 关闭按钮
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(self.accept)
+
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(refresh_button)
+        button_layout.addStretch()
+        button_layout.addWidget(close_button)
+        layout.addLayout(button_layout)
+
+    def load_messages(self):
+        """从API加载消息"""
+        self.message_list.clear()
+        self.message_detail.clear()
+
+        if not self.token:
+            self.message_list.addItem("请先登录后查看消息")
+            return
+
+        try:
+            url = "http://cf-v2.uapis.cn/messages"
+            params = {"token": self.token}
+            headers = get_headers()
+
+            response = requests.get(url, headers=headers, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                if data['code'] == 200:
+                    messages = data.get('data', [])
+
+                    if not messages:
+                        self.message_list.addItem("暂无消息")
+                        return
+
+                    for message in messages:
+                        item = QListWidgetItem()
+
+                        # 判断是否为全局消息或个人消息
+                        is_global = message.get('quanti') == 'yes'
+
+                        # 设置消息图标
+                        if is_global:
+                            item.setIcon(QIcon.fromTheme("dialog-information"))
+                        else:
+                            item.setIcon(QIcon.fromTheme("dialog-warning"))
+
+                        # 设置消息标题
+                        time_str = message.get('time', '').split('T')[0]  # 简化时间格式
+                        title = f"[{time_str}] {'系统公告' if is_global else '个人通知'}"
+                        item.setText(title)
+
+                        # 存储消息内容
+                        item.setData(Qt.ItemDataRole.UserRole, message)
+
+                        # 设置文字颜色
+                        if not is_global:
+                            item.setForeground(Qt.GlobalColor.red)
+
+                        self.message_list.addItem(item)
+                else:
+                    self.message_list.addItem(f"获取消息失败: {data.get('msg', '未知错误')}")
+            else:
+                self.message_list.addItem(f"网络错误: {response.status_code}")
+        except Exception as e:
+            if self.parent:
+                self.parent.logger.error(f"加载消息时发生错误: {str(e)}")
+            self.message_list.addItem(f"加载消息失败: {str(e)}")
+
+    def show_message_detail(self, item):
+        """显示消息详情"""
+        message = item.data(Qt.ItemDataRole.UserRole)
+        if not message:
+            return
+
+        content = message.get('content', '')
+        time_str = message.get('time', '').replace('T', ' ').split('.')[0]
+        is_global = message.get('quanti') == 'yes'
+
+        detail_html = f"""
+        <h3>{'系统公告' if is_global else '个人通知'}</h3>
+        <p><b>时间:</b> {time_str}</p>
+        <p><b>内容:</b></p>
+        <div style="background-color: {'#f0f0f0' if is_global else '#fff0f0'}; padding: 10px; border-radius: 5px;">
+            {content}
+        </div>
+        """
+
+        self.message_detail.setHtml(detail_html)
+
+    def apply_theme(self, is_dark):
+        """应用主题"""
+        if is_dark:
+            self.setStyleSheet("""
+                QDialog { background-color: #2D2D2D; color: #FFFFFF; }
+                QListWidget { background-color: #3D3D3D; color: #FFFFFF; border: 1px solid #555555; }
+                QListWidget::item:alternate { background-color: #353535; }
+                QTextEdit { background-color: #3D3D3D; color: #FFFFFF; border: 1px solid #555555; }
+                QPushButton { background-color: #0D6EFD; color: white; border-radius: 4px; padding: 6px 12px; }
+                QPushButton:hover { background-color: #0B5ED7; }
+            """)
+        else:
+            self.setStyleSheet("""
+                QDialog { background-color: #FFFFFF; color: #212529; }
+                QListWidget { background-color: #FFFFFF; color: #212529; border: 1px solid #CED4DA; }
+                QListWidget::item:alternate { background-color: #F8F9FA; }
+                QTextEdit { background-color: #FFFFFF; color: #212529; border: 1px solid #CED4DA; }
+                QPushButton { background-color: #0D6EFD; color: white; border-radius: 4px; padding: 6px 12px; }
+                QPushButton:hover { background-color: #0B5ED7; }
+            """)
 
 if __name__ == '__main__':
     def exception_hook(exctype, value, main_thread):
