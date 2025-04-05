@@ -40,6 +40,7 @@ jobs:
         run: |
           python -m nuitka --standalone --python-flag=-O `
           --include-data-files=./favicon.ico=./favicon.ico `
+          --include-data-files=./favicon-d.ico=./favicon-d.ico `
           --include-data-files=./CUL_update.exe=./CUL_update.exe `
           --include-data-files=./frpc.exe=./frpc.exe `
           --include-package=PyQt6 `

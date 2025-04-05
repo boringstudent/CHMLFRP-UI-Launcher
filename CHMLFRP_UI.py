@@ -33,63 +33,63 @@ import html
 urllib3.disable_warnings()
 
 # ------------------------------以下为程序信息--------------------
-# 程序信息
 APP_NAME = "CUL" # 程序名称
 APP_VERSION = "1.6.4" # 程序版本
 PY_VERSION = "3.13.*" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
-# 更新全局配置
-
 DNS_CONFIG = {
-    "servers": [
-        "1.1.1.1",  # Cloudflare
-        "8.8.8.8",  # Google
-        "114.114.114.114",  # 114DNS
-        "223.5.5.5",  # AliDNS
-        "9.9.9.9"  # Quad9
-    ],
-    "timeout": 5,
-    "domain": "api.github.com"
-}
+USER_AGENT = f"{APP_NAME}/{APP_VERSION} (Python/{PY_VERSION}; {WINDOWS_VERSION})" # 生成统一的 User-Agent
 
 # ------------------------------更新的镜像地址--------------------
-# 默认备用镜像列表
-DEFAULT_MIRRORS = [
-    "github.tbedu.top",  # 3mb
-    "gitproxy.click",  # 2-3mb
-    "github.moeyy.xyz",  # 5mb
-    "ghproxy.net",  # 4mb
-    "gh.llkk.cc",  # 3mb
-]
 
-# API地址
-API_URL = "https://api.akams.cn/github"
+def exception_hook(exctype, value, main_thread):
+    while main_thread:
+        main_thread = main_thread.tb_next
+    sys.__excepthook__(exctype, value, main_thread)
 
 def get_mirrors():
+    """
+    获取可用的GitHub镜像站点列表
+    返回：按API返回顺序的镜像站点列表（去除http/https前缀），过滤掉速度为0的站点
+    """
+    # 默认备用镜像列表
+    DEFAULT_MIRRORS = [
+        "github.tbedu.top",
+        "gitproxy.click",
+        "github.moeyy.xyz",
+        "ghproxy.net",
+        "gh.llkk.cc"
+    ]
     try:
-        # 发起请求
-        response = requests.get(API_URL)
-        response.raise_for_status()  # 检查请求是否成功
-        data = response.json()
-
-        # 检查返回的code是否为200
+        # 发起请求获取镜像站点信息
+        response = requests.get("https://api.akams.cn/github")
+        response.raise_for_status()  # 如果请求失败会抛出异常
+        data = response.json()  # 解析JSON响应
+        # 检查API返回状态码
         if data.get("code") == 200:
-            mirrors = data.get("data", [])
-            # 根据速度从高到低排序
-            mirrors.sort(key=lambda x: x["speed"], reverse=True)
-            # 提取可用的镜像地址并去除http/https头
-            MIRROR_PREFIXES = [mirror["url"].replace("https://", "").replace("http://", "").strip() for mirror in mirrors if mirror["speed"] > 0]
+            mirrors = data.get("data", [])  # 获取镜像数据，如果不存在则返回空列表
+            # 过滤掉速度为0的镜像
+            valid_mirrors = [mirror for mirror in mirrors if mirror.get("speed", 0) > 0]
+            # 提取镜像URL并去除协议前缀
+            MIRROR_PREFIXES = [
+                mirror["url"].replace("https://", "").replace("http://", "").strip()
+                for mirror in valid_mirrors
+            ]
             return MIRROR_PREFIXES
         else:
             print(f"API返回错误代码：{data.get('code')}")
-            return DEFAULT_MIRRORS
+            return DEFAULT_MIRRORS  # 返回默认镜像列表
 
     except requests.RequestException as e:
         print(f"请求API失败：{e}")
-        return DEFAULT_MIRRORS
-
-DOWNLOAD_TIMEOUT = 10
+        return DEFAULT_MIRRORS  # 请求失败时返回默认镜像列表
+    except ValueError as e:
+        print(f"解析JSON响应失败：{e}")
+        return DEFAULT_MIRRORS  # JSON解析失败时返回默认镜像列表
+    except Exception as e:
+        print(f"未知错误：{e}")
+        return DEFAULT_MIRRORS  # 未知错误时返回默认镜像列表
 
 def get_absolute_path(relative_path):
     """获取相对于程序目录的绝对路径"""
@@ -101,57 +101,17 @@ def check_file_empty(filename):
 
     if not os.path.exists(file_path):
         return True, "文件不存在"
-
     try:
         return os.path.getsize(file_path) == 0, "文件为空" if os.path.getsize(file_path) == 0 else "文件不为空"
     except OSError as e:
         return True, f"读取文件出错: {str(e)}"
 
-# 从配置文件加载日志设置
-try:
-    settings_path = get_absolute_path("settings.json")
-    if os.path.exists(settings_path):
-        with open(settings_path, 'r') as f:
-            settings = json.load(f)
-            maxBytes = settings.get('log_size_mb', 10) * 1024 * 1024  # 默认10MB
-            backupCount = settings.get('backup_count', 30)  # 默认30个备份
-    else:
-        maxBytes = 10 * 1024 * 1024  # 默认10MB
-        backupCount = 30  # 默认30个备份
-except Exception as e:
-    print(f"加载日志设置失败: {str(e)}")
-    maxBytes = 10 * 1024 * 1024  # 默认10MB
-    backupCount = 30  # 默认30个备份
-
-# 生成统一的 User-Agent
-USER_AGENT = f"{APP_NAME}/{APP_VERSION} (Python/{PY_VERSION}; {WINDOWS_VERSION})"
-
-# 生成统一的请求头
 def get_headers(request_json=False):
-    """
-    获取统一的请求头
-    Args:
-        request_json: 是否添加 Content-Type: application/json
-    Returns:
-        dict: 请求头字典
-    """
+    # 生成统一的请求头
     headers = {'User-Agent': USER_AGENT}
     if request_json:
         headers['Content-Type'] = 'application/json'
     return headers
-
-# 设置全局日志
-logger = logging.getLogger('CHMLFRP_UI')
-logger.setLevel(logging.DEBUG)
-file_handler = RotatingFileHandler('CHMLFRP_UI.log', maxBytes=maxBytes, backupCount=backupCount)
-file_handler.setLevel(logging.DEBUG)
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-file_handler.setFormatter(formatter)
-console_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-logger.addHandler(console_handler)
 
 class message_push():
     CONFIG_MAP = {
@@ -282,6 +242,18 @@ class ProgramUpdates():
     def check_update(cls, current_version):
         """检测更新，返回最新版本、更新内容和所有镜像下载链接"""
         try:
+            # 更新全局配置
+            DNS_CONFIG = {
+                "servers": [
+                    "1.1.1.1",  # Cloudflare
+                    "8.8.8.8",  # Google
+                    "114.114.114.114",  # 114DNS
+                    "223.5.5.5",  # AliDNS
+                    "9.9.9.9"  # Quad9
+                ],
+                "timeout": 10,
+                "domain": "api.github.com"
+            }
             # 1. DNS解析和IP测试
             resolver = Resolver()
             resolver.nameservers = DNS_CONFIG["servers"]
@@ -603,7 +575,6 @@ class QtHandler(QObject, logging.Handler):
 class TunnelCard(QFrame):
     clicked = pyqtSignal(object, bool)
     start_stop_signal = pyqtSignal(object, bool)
-
     def __init__(self, tunnel_info, user_token, parent=None):
         super().__init__()
         self.backup_status_label = None
@@ -641,17 +612,14 @@ class TunnelCard(QFrame):
             remote_label = QLabel("远程端口: 443")
         else:
             remote_label = QLabel(f"远程端口: {self.tunnel_info.get('dorp', 'Unknown')}")
-
         node_label = QLabel(f"节点: {self.tunnel_info.get('node', 'Unknown')}")
         self.status_label = QLabel("状态: 未启动")
         self.link_label = QLabel(f"连接: {self.get_link()}")
         self.link_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.link_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.link_label.mousePressEvent = self.copy_link
-
         # 添加备用节点状态标签
         self.backup_status_label = QLabel("备用节点: 正在加载...")
-
         # 添加备注标签
         self.comment_label = QLabel("备注: 无")
         self.comment_label.setWordWrap(True)
@@ -880,10 +848,8 @@ class BatchEditDialog(QDialog):
     def initUI(self):
         # 使用水平布局
         main_layout = QHBoxLayout(self)
-
         # 左侧编辑区域
         left_layout = QVBoxLayout()
-
         # API版本选择
         api_version_group = QGroupBox("API版本选择")
         api_layout = QVBoxLayout()
@@ -894,7 +860,6 @@ class BatchEditDialog(QDialog):
         api_version_group.setLayout(api_layout)
         self.v2_api_radio.setChecked(True)  # 默认选择V2
         left_layout.addWidget(api_version_group)
-
         # 强制修改选项
         self.force_update_checkbox = QCheckBox("强制修改（删除后重建）")
         force_update_note = QLabel("注意：强制修改会先删除原隧道再创建新隧道，隧道ID会变更，且可能失败")
@@ -902,7 +867,6 @@ class BatchEditDialog(QDialog):
         force_update_note.setWordWrap(True)
         left_layout.addWidget(self.force_update_checkbox)
         left_layout.addWidget(force_update_note)
-
         # 备注设置组
         comment_group = QGroupBox("备注设置")
         comment_layout = QVBoxLayout()
@@ -930,15 +894,11 @@ class BatchEditDialog(QDialog):
         self.type_combo.addItem("不修改")
         self.type_combo.addItems(["tcp", "udp", "http", "https"])
         # 移除类型变化监听器，因为不再需要动态更新域名输入框
-
         self.local_ip_input = QLineEdit()
         self.local_ip_input.setPlaceholderText("不修改")
 
         self.local_port_input = QLineEdit()
         self.local_port_input.setPlaceholderText("不修改")
-
-        # 移除绑定域名/远程端口输入框，因为这些不能在批量编辑中修改
-
         # 加密和压缩选项
         self.encryption_combo = QComboBox()
         self.encryption_combo.addItems(["不修改", "开启", "关闭"])
@@ -974,11 +934,9 @@ class BatchEditDialog(QDialog):
         self.node_detail_text.setMinimumWidth(300)
         right_layout.addWidget(detail_label)
         right_layout.addWidget(self.node_detail_text)
-
         # 将两部分添加到主布局
         main_layout.addLayout(left_layout)
         main_layout.addLayout(right_layout)
-
         # 初始化节点详情
         self.on_node_changed(self.node_combo.currentIndex())
 
@@ -1043,7 +1001,6 @@ class BatchEditDialog(QDialog):
 
 class DomainCard(QFrame):
     clicked = pyqtSignal(object)
-
     def __init__(self, domain_info):
         super().__init__()
         self.link_label = None
@@ -1131,10 +1088,8 @@ class StopWorker(QObject):
         # 停止普通隧道
         for tunnel_name in list(self.tunnel_processes.keys()):
             self.stop_single_tunnel(tunnel_name, is_dynamic=False)
-
         # 确保所有 frpc.exe 进程都被终止
         self.kill_remaining_frpc_processes()
-
         self.progress.emit("所有隧道已停止")
         self.finished.emit()
 
@@ -1249,20 +1204,13 @@ class OutputDialog(QDialog):
                     self.output_browser.verticalScrollBar().maximum()
                 )
 
-
     def update_run_selector(self):
         """更新运行记录选择器"""
         self.run_selector.blockSignals(True)
-
-        currently_selected = self.run_selector.currentData()
-
         self.run_selector.clear()
-
         run_numbers = sorted(self.runs_data.keys())
-
         for run_number in run_numbers:
             self.run_selector.addItem(f"运行 #{run_number}", run_number)
-
         if self.run_selector.count() > 0:
             latest_run = max(run_numbers) if run_numbers else None
 
@@ -1331,16 +1279,13 @@ class SettingsDialog(QDialog):
 
         tab_widget = QTabWidget()
         layout.addWidget(tab_widget)
-
         # === 常规标签页 ===
         general_tab = QWidget()
         general_layout = QVBoxLayout(general_tab)
-
         # 自启动选项
         self.autostart_checkbox = QCheckBox("开机自启动")
         self.autostart_checkbox.stateChanged.connect(self.toggle_autostart)
         general_layout.addWidget(self.autostart_checkbox)
-
         # 主题设置
         theme_group = QGroupBox("主题设置")
         theme_layout = QVBoxLayout()
@@ -1352,11 +1297,9 @@ class SettingsDialog(QDialog):
         theme_layout.addWidget(self.theme_system)
         theme_group.setLayout(theme_layout)
         general_layout.addWidget(theme_group)
-
         # 日志设置组
         log_group = QGroupBox("日志设置")
         log_layout = QFormLayout()
-
         # 日志文件大小设置
         self.log_size_input = QLineEdit()
         self.log_size_input.setValidator(QIntValidator(1, 1000))  # 限制输入为1-1000
@@ -1365,13 +1308,11 @@ class SettingsDialog(QDialog):
         size_layout.addWidget(self.log_size_input)
         size_layout.addWidget(QLabel("MB"))
         log_layout.addRow("日志文件大小:", size_layout)
-
         # 日志文件备份数量设置
         self.backup_count_input = QLineEdit()
         self.backup_count_input.setValidator(QIntValidator(1, 100))  # 限制输入为1-100
         self.backup_count_input.setPlaceholderText("1-100")
         log_layout.addRow("日志文件备份数量:", self.backup_count_input)
-
         # 添加日志设置说明
         log_note = QLabel("注: 更改将在重启程序后生效")
         log_note.setStyleSheet("color: gray; font-size: 10px;")
@@ -1382,7 +1323,6 @@ class SettingsDialog(QDialog):
 
         general_layout.addStretch()
         tab_widget.addTab(general_tab, "常规")
-
         # === 隧道标签页 ===
         tunnel_tab = QWidget()
         tunnel_layout = QVBoxLayout(tunnel_tab)
@@ -1390,14 +1330,12 @@ class SettingsDialog(QDialog):
         tunnel_layout.addWidget(QLabel("程序启动时自动启动以下隧道:"))
         self.tunnel_list = QListWidget()
         tunnel_layout.addWidget(self.tunnel_list)
-
         # 添加隧道设置说明
         tunnel_note = QLabel("注: 勾选的隧道将在程序启动时自动启动")
         tunnel_note.setStyleSheet("color: gray; font-size: 10px;")
         tunnel_layout.addWidget(tunnel_note)
 
         tab_widget.addTab(tunnel_tab, "隧道")
-
         # === 关于标签页 ===
         about_tab = QWidget()
         about_layout = QVBoxLayout(about_tab)
@@ -2421,7 +2359,6 @@ class UpdateCheckerWorker(QObject):
             if latest_version is None:
                 self.error.emit("无法获取更新信息")
                 return
-
             if latest_version == APP_VERSION:
                 self.finished.emit(latest_version, update_content, [])
             elif download_links:
@@ -2503,7 +2440,6 @@ class NodeCard(QFrame):
 class ApiStatusCard(QFrame):
     """显示API服务器状态的卡片"""
     clicked = pyqtSignal(object)
-
     def __init__(self, api_info=None):
         super().__init__()
         self.api_info = api_info or {}
@@ -2659,6 +2595,23 @@ class BackupNodeConfigDialog(QDialog):
         self.init_ui()
         self.load_existing_config()
 
+    def get_tunnel_target(self, tunnel_info, node_info):
+        try:
+            if not tunnel_info or not node_info:
+                self.logger.error(f"无法获取隧道目标: tunnel_info={bool(tunnel_info)}, node_info={bool(node_info)}")
+                return None
+
+            tunnel_type = tunnel_info.get('type', '').lower()
+
+            if tunnel_type in ['http', 'https']:
+                return tunnel_info.get('dorp', '')
+            else:
+                node_domain = node_info.get('ip', node_info.get('name', ''))
+                return node_domain
+        except Exception as e:
+            self.logger.error(f"获取隧道目标时发生错误: {str(e)}")
+            return None
+
     def apply_theme(self, dark_theme):
         if dark_theme:
             self.setStyleSheet("""
@@ -2799,6 +2752,26 @@ class BackupNodeConfigDialog(QDialog):
         except Exception as e:
             self.parent.logger.error(f"加载主域名时发生错误: {str(e)}")
 
+    def get_node_info(self, node_name):
+        """获取节点信息"""
+        try:
+            url = f"http://cf-v2.uapis.cn/nodeinfo"
+            params = {
+                'token': self.token,
+                'node': node_name
+            }
+            headers = get_headers()
+            response = requests.get(url, headers=headers, params=params)
+            data = response.json()
+            if data['code'] == 200:
+                return data['data']
+            else:
+                self.logger.error(f"获取节点信息失败: {data.get('msg', '')}")
+                return None
+        except Exception as e:
+            self.logger.error(f"获取节点信息时发生错误: {str(e)}")
+            return None
+
     def check_domain_target(self, domain_config, node_name, tunnel_info):
         try:
             if not domain_config or not node_name or not tunnel_info:
@@ -2882,7 +2855,7 @@ class BackupNodeConfigDialog(QDialog):
             return
 
         # 调用父窗口的check_domain_target方法来检查域名指向
-        is_correct = self.parent.check_domain_target(domain_info, node_name, tunnel_info)
+        is_correct = self.check_domain_target(domain_info, node_name, tunnel_info)
 
         # 显示检查结果
         if is_correct:
@@ -3099,26 +3072,21 @@ class MainWindow(QMainWindow):
 
         self.mail_notifier = None
         self.load_mail_config()
-
         # 初始化输出互斥锁
         self.output_mutex = QMutex()
-
         # 初始化日志系统
         self.logger = logging.getLogger('CHMLFRP_UI')
         self.qt_handler = QtHandler(self)
         self.logger.addHandler(self.qt_handler)
         self.qt_handler.new_record.connect(self.update_log)
-
         # 初始化日志显示
         self.log_display = QTextEdit(self)
         self.log_display.setReadOnly(True)
         self.log_display.setFixedHeight(100)
-
         # 添加进程锁
         self.process_lock = threading.Lock()
         self.tunnel_lock = threading.Lock()
         self.output_lock = threading.Lock()
-
         # 加载程序设置
         self.load_app_settings()
 
@@ -3151,44 +3119,69 @@ class MainWindow(QMainWindow):
 
         # 初始化UI
         self.initUI()
-
         # 确保在初始化后立即应用主题
         self.apply_theme()
-
         # 加载凭证和自动登录
         self.load_credentials()
         self.auto_login()
 
     def initUI(self):
-        self.setWindowTitle(APP_NAME+"-ChmlFrp第三方启动器")
+        # 设置窗口标题和大小
+        self.setWindowTitle(APP_NAME + "-ChmlFrp第三方启动器")
         self.setGeometry(100, 100, 800, 600)
+        # 设置无边框窗口
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        # 设置背景透明
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
+        # 创建中央窗口部件
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
 
+        # 设置主布局
         main_layout = QVBoxLayout(central_widget)
 
+        # 创建背景框架
         self.background_frame = QFrame(self)
         self.background_frame.setObjectName("background")
         background_layout = QVBoxLayout(self.background_frame)
         main_layout.addWidget(self.background_frame)
 
+        # 创建带有图标的标题栏
         title_bar = QWidget()
         title_layout = QHBoxLayout(title_bar)
-        title_label = QLabel(APP_NAME+"-ChmlFrp第三方启动器")
+
+        # 在标题左侧添加favicon图标
+        icon_label = QLabel()
+        # 加载favicon.ico图标
+        icon_pixmap = QPixmap(get_absolute_path("favicon-d.ico"))
+        if not icon_pixmap.isNull():
+            # 将图标缩放到24x24像素，保持纵横比
+            icon_pixmap = icon_pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio,
+                                             Qt.TransformationMode.SmoothTransformation)
+            icon_label.setPixmap(icon_pixmap)
+        else:
+            # 图标加载失败时记录错误
+            self.logger.error("无法加载图标: favicon-d.ico")
+        # 将图标添加到标题布局中
+        title_layout.addWidget(icon_label)
+
+        # 添加标题文本
+        title_label = QLabel(APP_NAME + "-ChmlFrp第三方启动器")
         title_layout.addWidget(title_label)
         title_layout.addStretch(1)
 
+        # 添加设置按钮
         self.settings_button = QPushButton("设置")
         self.settings_button.clicked.connect(self.show_settings)
         title_layout.addWidget(self.settings_button)
 
+        # 添加检测更新按钮
         self.settings_button = QPushButton("检测更新")
         self.settings_button.clicked.connect(self.show_update)
         title_layout.addWidget(self.settings_button)
 
+        # 添加最小化和关闭按钮
         min_button = QPushButton("－")
         min_button.clicked.connect(self.showMinimized)
         close_button = QPushButton("×")
@@ -3198,55 +3191,69 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(close_button)
         background_layout.addWidget(title_bar)
 
+        # 设置内容布局
         content_layout = QHBoxLayout()
 
+        # 创建左侧菜单
         menu_widget = QWidget()
         menu_layout = QVBoxLayout(menu_widget)
 
+        # 创建菜单按钮
         self.user_info_button = QPushButton("用户信息")
         self.tunnel_button = QPushButton("隧道管理")
         self.domain_button = QPushButton("域名管理")
         self.node_button = QPushButton("节点状态")
 
+        # 连接按钮点击事件
         self.user_info_button.clicked.connect(lambda: self.switch_tab("user_info"))
         self.tunnel_button.clicked.connect(lambda: self.switch_tab("tunnel"))
         self.domain_button.clicked.connect(lambda: self.switch_tab("domain"))
         self.node_button.clicked.connect(lambda: self.switch_tab("node"))
 
+        # 将按钮添加到菜单布局
         menu_layout.addWidget(self.user_info_button)
         menu_layout.addWidget(self.tunnel_button)
         menu_layout.addWidget(self.domain_button)
         menu_layout.addWidget(self.node_button)
-        menu_layout.addStretch(1)
+        menu_layout.addStretch(1)  # 添加弹性空间，使按钮位于顶部
 
+        # 将菜单添加到内容布局
         content_layout.addWidget(menu_widget)
 
+        # 创建内容堆栈部件，用于切换不同页面
         self.content_stack = QStackedWidget()
         content_layout.addWidget(self.content_stack, 1)
 
+        # 将内容布局添加到背景布局
         background_layout.addLayout(content_layout)
 
+        # 添加日志显示框
         background_layout.addWidget(self.log_display)
 
+        # 添加作者信息
         author_info = QLabel("本程序基于ChmlFrp apiv2开发 作者: boring_student")
         author_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
         author_info.setStyleSheet("font-size: 7pt; color: #888888; background: transparent; padding: 2px;")
         author_info.setProperty("author_info", True)
         author_info.setFixedHeight(18)
 
+        # 创建底部布局
         bottom_layout = QHBoxLayout()
         bottom_layout.addStretch(1)
         bottom_layout.addWidget(author_info)
         bottom_layout.setContentsMargins(0, 0, 5, 2)
         background_layout.addLayout(bottom_layout)
 
+        # 设置各页面
         self.setup_user_info_page()
         self.setup_tunnel_page()
         self.setup_domain_page()
         self.setup_node_page()
 
+        # 默认显示用户信息页面
         self.switch_tab("user_info")
 
+        # 保存所有标签按钮的引用
         self.tab_buttons = [
             self.user_info_button,
             self.tunnel_button,
@@ -3259,18 +3266,14 @@ class MainWindow(QMainWindow):
         if not self.selected_tunnels:
             QMessageBox.warning(self, "警告", "请先选择一个隧道")
             return
-
         if len(self.selected_tunnels) > 1:
             QMessageBox.warning(self, "警告", "一次只能配置一个隧道的备用节点")
             return
-
         tunnel_info = self.selected_tunnels[0]
         dialog = BackupNodeConfigDialog(tunnel_info, self.token, self)
-
         # 应用当前主题
         if hasattr(self, 'dark_theme'):
             dialog.apply_theme(self.dark_theme)
-
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.logger.info(f"隧道 '{tunnel_info['name']}' 的备用节点配置已保存")
             # 配置保存后刷新隧道列表，显示更新后的备用节点状态
@@ -3281,7 +3284,6 @@ class MainWindow(QMainWindow):
         if not tunnel_id:
             self.logger.error("获取备用节点配置失败: 隧道ID为空")
             return None
-
         config_path = get_absolute_path("backup_config.json")
         if os.path.exists(config_path):
             try:
@@ -3289,7 +3291,6 @@ class MainWindow(QMainWindow):
                     with open(config_path, 'w') as f:
                         json.dump({}, f)
                     return None
-
                 with open(config_path, 'r') as f:
                     try:
                         configs = json.load(f)
@@ -3299,17 +3300,14 @@ class MainWindow(QMainWindow):
                             if not isinstance(config, dict):
                                 self.logger.error(f"隧道 {tunnel_id} 的备用节点配置无效")
                                 return None
-
                             return config
                         else:
                             return None
-
                     except json.JSONDecodeError:
                         self.logger.error(f"备用节点配置文件格式错误，重新初始化")
                         with open(config_path, 'w') as f:
                             json.dump({}, f)
                         return None
-
             except Exception as e:
                 self.logger.error(f"读取备用节点配置失败: {str(e)}")
         else:
@@ -3319,7 +3317,6 @@ class MainWindow(QMainWindow):
                 self.logger.info("已创建备用节点配置文件")
             except Exception as e:
                 self.logger.error(f"创建备用节点配置文件失败: {str(e)}")
-
         return None
 
     def load_tunnel_comments(self):
@@ -3363,14 +3360,11 @@ class MainWindow(QMainWindow):
         config = self.get_backup_config(tunnel_id)
         if not config:
             return "无备用配置"
-
         nodes = config.get('backup_nodes', [])
         domain = config.get('domain')
-
         status = f"{len(nodes)}个备用节点"
         if domain:
             status += ", 已配置域名"
-
         return status
 
     def get_node_info(self, node_name):
@@ -3384,7 +3378,6 @@ class MainWindow(QMainWindow):
             headers = get_headers()
             response = requests.get(url, headers=headers, params=params)
             data = response.json()
-
             if data['code'] == 200:
                 return data['data']
             else:
@@ -3403,12 +3396,10 @@ class MainWindow(QMainWindow):
                     json.dump({}, f)
                 self.logger.info("已创建备用节点配置文件")
                 return
-
             if os.path.getsize(config_path) == 0:
                 with open(config_path, 'w') as f:
                     json.dump({}, f)
                 return
-
             try:
                 with open(config_path, 'r') as f:
                     configs = json.load(f)
@@ -3417,23 +3408,18 @@ class MainWindow(QMainWindow):
                 with open(config_path, 'w') as f:
                     json.dump({}, f)
                 return
-
             tunnels = API.get_user_tunnels(self.token)
             if tunnels is None:
                 return
-
             tunnel_ids = [str(t['id']) for t in tunnels]
             modified = False
-
             for tunnel_id in list(configs.keys()):
                 if tunnel_id not in tunnel_ids:
                     del configs[tunnel_id]
                     modified = True
-
             if modified:
                 with open(config_path, 'w') as f:
                     json.dump(configs, f, indent=4)
-
         except Exception as e:
             self.logger.error(f"清理备用节点配置时发生错误: {str(e)}")
             try:
@@ -3449,7 +3435,6 @@ class MainWindow(QMainWindow):
             with open(settings_path, 'r') as f:
                 settings = json.load(f)
                 mail_config = settings.get('mail', {})
-
                 if mail_config.get('sender_email') and mail_config.get('password'):
                     self.mail_notifier = message_push(
                         sender_email=mail_config['sender_email'],
@@ -3464,10 +3449,8 @@ class MainWindow(QMainWindow):
         """发送通知"""
         if not self.mail_notifier or not self.notify_settings.get(event_type, False):
             return
-
         computer_name = message_push.get_computer_name()
         current_time = message_push.get_current_time()
-
         if event_type == "tunnel_offline":
             event_type = f"{name}隧道离线了"
         elif event_type == "node_offline":
@@ -3476,7 +3459,6 @@ class MainWindow(QMainWindow):
             event_type = f"{name}隧道上线了"
         elif event_type == "node_online":
             event_type = f"{name}节点上线了"
-
         subject = f"{APP_NAME}系统通知 - {event_type}"
         body = f"""
         事件类型：{event_type}
@@ -3498,14 +3480,12 @@ class MainWindow(QMainWindow):
                 with open(settings_path_json, 'r') as file_contents:
                     settings_content = json.load(file_contents)
                     theme_setting = settings_content.get('theme', 'system')
-
                     if theme_setting == 'system':
                         self.dark_theme = self.is_system_dark_theme()
                     elif theme_setting == 'dark':
                         self.dark_theme = True
                     else:  # light
                         self.dark_theme = False
-
             else:
                 self.dark_theme = self.is_system_dark_theme()
                 self.logger.info("使用系统默认主题设置")
@@ -3532,13 +3512,11 @@ class MainWindow(QMainWindow):
     def auto_start_tunnels(self):
         if not self.token:
             return
-
         settings_path_json = get_absolute_path("settings.json")
         try:
             with open(settings_path_json, 'r') as file_contents:
                 settings_content = json.load(file_contents)
                 auto_start_tunnels = settings_content.get('auto_start_tunnels', [])
-
             tunnels = API.get_user_tunnels(self.token)
             if tunnels:
                 for tunnel in tunnels:
@@ -3595,10 +3573,7 @@ class MainWindow(QMainWindow):
             headers = get_headers()
             try:
                 response = requests.get(url, headers=headers, params=params)
-                # 检查响应是否为有效的 JSON
                 data = response.json()
-
-                # 检查响应是否包含 'code' 字段
                 if 'code' not in data:
                     self.logger.error(f"API返回格式错误，缺少'code'字段: {data}")
                     return False
@@ -3606,24 +3581,18 @@ class MainWindow(QMainWindow):
                 if data['code'] != 200:
                     self.logger.error(f"获取域名信息失败: {data.get('msg', '')}")
                     return False
-
-                # 检查响应是否包含 'data' 字段
                 if 'data' not in data:
                     self.logger.error(f"API返回格式错误，缺少'data'字段: {data}")
                     return False
 
-                # 根据你提供的文档，data 字段应该是一个对象，但实际上可能是一个列表
-                # 尝试找到匹配的域名记录
                 found_record = None
                 if isinstance(data['data'], list):
-                    # 如果 data 是列表，遍历查找匹配的记录
                     for item in data['data']:
                         if (item.get('domain') == domain and
                                 item.get('record') == record):
                             found_record = item
                             break
                 elif isinstance(data['data'], dict):
-                    # 如果 data 是单个对象，直接检查是否匹配
                     if (data['data'].get('domain') == domain and
                             data['data'].get('record') == record):
                         found_record = data['data']
@@ -3632,7 +3601,6 @@ class MainWindow(QMainWindow):
                     self.logger.error(f"未找到域名记录: {record}.{domain}")
                     return False
 
-                # 获取当前目标
                 current_target = found_record.get('target', '')
 
             except requests.exceptions.RequestException as e:
@@ -3665,7 +3633,6 @@ class MainWindow(QMainWindow):
         """检查所有隧道的域名配置是否需要更新"""
         if not self.token:
             return
-
         try:
             tunnels = API.get_user_tunnels(self.token)
             if not tunnels:
@@ -3699,13 +3666,10 @@ class MainWindow(QMainWindow):
         """检查节点状态并处理隧道切换"""
         if not self.token:
             return
-
         tunnels = API.get_user_tunnels(self.token)
         if tunnels is None:
             return
-
         online_nodes = set(self.last_node_list)
-
         for tunnel_name, process in list(self.tunnel_processes.items()):
             tunnel_info = next((t for t in tunnels if t['name'] == tunnel_name), None)
             if tunnel_info:
@@ -3746,19 +3710,15 @@ class MainWindow(QMainWindow):
             if not tunnel_info:
                 self.logger.error("检查隧道域名配置失败: 隧道信息为空")
                 return
-
             backup_config = self.get_backup_config(tunnel_info.get('id'))
             if not backup_config:
                 return
-
             domain_config = backup_config.get('domain')
             if not domain_config:
                 return
-
             if not domain_config.get('domain') or not domain_config.get('record'):
                 self.logger.error(f"隧道 {tunnel_info.get('name', 'unknown')} 的域名配置不完整")
                 return
-
             last_updated = domain_config.get('last_updated')
             if last_updated:
                 try:
@@ -3768,28 +3728,21 @@ class MainWindow(QMainWindow):
                 except (ValueError, TypeError):
                     self.logger.warning(f"无法解析上次更新时间: {last_updated}")
                     pass
-
             node_name = tunnel_info.get('node')
             if not node_name:
                 self.logger.error(f"隧道 {tunnel_info.get('name', 'unknown')} 没有节点信息")
                 return
-
             if self.check_domain_target(domain_config, node_name, tunnel_info):
                 return
-
             self.update_domain_for_backup(domain_config, tunnel_info, node_name)
-
         except Exception as e:
             self.logger.error(f"检查隧道域名配置时发生错误: {str(e)}")
 
     # 添加节点上线检测
     def check_new_nodes(self):
-        # 将 self.last_node_list 转换为集合
         previous_nodes = set(self.last_node_list)
-
         # 获取当前节点名称
         current_nodes = set(n['node_name'] for n in API.is_node_online(tyen="all")['data'])
-
         # 检测新上线的节点
         new_nodes = current_nodes - previous_nodes
         if new_nodes:
@@ -3797,43 +3750,7 @@ class MainWindow(QMainWindow):
                 self.send_notification("node_online",
                                        f"新节点上线：{node}\n上线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                                        node)
-
-            # 更新 self.last_node_list 为当前节点名称列表
             self.last_node_list = [n['node_name'] for n in API.is_node_online(tyen="all")['data']]
-
-    def update_button_styles(self, selected_button):
-        for button in self.tab_buttons:
-            if button == selected_button:
-                button.setStyleSheet(f"""
-					QPushButton {{
-						background-color: {self.button_hover_color};
-						color: white;
-						border: none;
-						padding: 5px 10px;
-						text-align: center;
-						text-decoration: none;
-						font-size: 14px;
-						margin: 4px 2px;
-						border-radius: 4px;
-					}}
-				""")
-            else:
-                button.setStyleSheet(f"""
-					QPushButton {{
-						background-color: {self.button_color};
-						color: white;
-						border: none;
-						padding: 5px 10px;
-						text-align: center;
-						text-decoration: none;
-						font-size: 14px;
-						margin: 4px 2px;
-						border-radius: 4px;
-					}}
-					QPushButton:hover {{
-						background-color: {self.button_hover_color};
-					}}
-				""")
 
     def batch_edit_tunnels(self):
         """批量编辑隧道"""
@@ -3915,7 +3832,6 @@ class MainWindow(QMainWindow):
                     else:
                         # 没有API更改，但可能有备注更改
                         successful_tunnels.append(tunnel_id)
-
                     # 无论API操作是否成功，都处理备注变更
                     if comment_change is not None:
                         self.set_tunnel_comment(tunnel_id, comment_change)
@@ -3998,18 +3914,14 @@ class MainWindow(QMainWindow):
         """自动检查是否有未读消息"""
         if not self.token:
             return
-
         try:
-            url = "http://cf-v2.uapis.cn/messages"
-            params = {"token": self.token}
+            url = f"http://cf-v2.uapis.cn/messages?token={self.token}"
             headers = get_headers()
-
             response = requests.get(url, headers=headers)
             if response.status_code == 200:
                 data = response.json()
                 if data['code'] == 200:
                     messages = data.get('data', [])
-
                     # 检查是否有个人消息
                     personal_messages = [m for m in messages if m.get('quanti') == 'no']
                     if personal_messages:
@@ -4024,12 +3936,8 @@ class MainWindow(QMainWindow):
         notification.setWindowTitle("新消息提醒")
         notification.setText(f"您有 {count} 条未读个人消息，请及时查看。")
         notification.setIcon(QMessageBox.Icon.Information)
-
         view_button = notification.addButton("查看消息", QMessageBox.ButtonRole.AcceptRole)
-        ignore_button = notification.addButton("稍后查看", QMessageBox.ButtonRole.RejectRole)
-
         notification.exec()
-
         if notification.clickedButton() == view_button:
             self.show_messages()
 
@@ -4048,16 +3956,6 @@ class MainWindow(QMainWindow):
         self.delete_tunnel_button.setEnabled(selected_count > 0)
         self.batch_edit_button.setEnabled(selected_count > 0)
         self.view_output_button.setEnabled(selected_count == 1)
-
-    def get_selected_tunnel_count(self):
-        count = 0
-        layout = self.tunnel_container.layout()
-        for i in range(layout.rowCount()):
-            for j in range(layout.columnCount()):
-                item = layout.itemAtPosition(i, j)
-                if item and isinstance(item.widget(), TunnelCard) and item.widget().is_selected:
-                    count += 1
-        return count
 
     def on_domain_clicked(self, domain_info):
         for i in range(self.domain_container.layout().count()):
@@ -4142,9 +4040,7 @@ class MainWindow(QMainWindow):
         # 检查是否有选中的隧道
         if not self.selected_tunnels:
             return
-
         menu = QMenu()
-
         # 只有选中一个隧道时才添加编辑备注选项
         if len(self.selected_tunnels) == 1:
             edit_comment_action = menu.addAction("编辑备注")
@@ -5042,15 +4938,6 @@ class MainWindow(QMainWindow):
         else:
             self.user_info_display.setPlainText("无法获取用户信息")
 
-    def clear_all_selections(self):
-        layout = self.tunnel_container.layout()
-        for i in range(layout.rowCount()):
-            for j in range(layout.columnCount()):
-                item = layout.itemAtPosition(i, j)
-                if item and isinstance(item.widget(), TunnelCard):
-                    item.widget().is_selected = False
-                    item.widget().setSelected(False)
-
     def load_tunnels(self):
         """加载隧道列表"""
         try:
@@ -5501,60 +5388,33 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                                  obfuscated_text)
         return obfuscated_text
 
-    def render_html(self, text):
-        """将文本转换为HTML，处理ANSI颜色代码和换行"""
-        # 替换ANSI颜色代码为HTML
-        text = re.sub(r'\033\[0;30m(.*?)(\033\[0m|\033\[0;)', r'<span style="color: black;">\1</span>', text)
-        text = re.sub(r'\033\[0;31m(.*?)(\033\[0m|\033\[0;)', r'<span style="color: red;">\1</span>', text)
-        text = re.sub(r'\033\[0;32m(.*?)(\033\[0m|\033\[0;)', r'<span style="color: green;">\1</span>', text)
-        text = re.sub(r'\033\[0;33m(.*?)(\033\[0m|\033\[0;)', r'<span style="color: yellow;">\1</span>', text)
-        text = re.sub(r'\033\[0;34m(.*?)(\033\[0m|\033\[0;)', r'<span style="color: blue;">\1</span>', text)
-        text = re.sub(r'\033\[0;35m(.*?)(\033\[0m|\033\[0;)', r'<span style="color: magenta;">\1</span>', text)
-        text = re.sub(r'\033\[0;36m(.*?)(\033\[0m|\033\[0;)', r'<span style="color: cyan;">\1</span>', text)
-        text = re.sub(r'\033\[0;37m(.*?)(\033\[0m|\033\[0;)', r'<span style="color: white;">\1</span>', text)
-        text = re.sub(r'\033\[0m', '', text)
-        text = html.escape(text)
-        return text
-
     def switch_to_backup_node(self, tunnel_info, current_process):
-        """当当前节点离线时切换到备用节点"""
+        """当节点离线时切换到备用节点"""
         try:
             backup_config = self.get_backup_config(tunnel_info.get('id'))
             if not backup_config:
                 self.logger.info(f"隧道 {tunnel_info.get('name', 'unknown')} 的节点离线，但没有备用节点配置")
                 return False
-
             backup_nodes = backup_config.get('backup_nodes')
             if not backup_nodes:
                 self.logger.info(f"隧道 {tunnel_info.get('name', 'unknown')} 的节点离线，但没有备用节点配置")
                 return False
-
-            # Stop current process
             tunnel_name = tunnel_info.get('name', 'unknown')
             if current_process and current_process.poll() is None:
-                # Process is still running, terminate it
                 current_process.terminate()
                 try:
                     current_process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     current_process.kill()
-
-            # Remove from running processes list if it exists
             if tunnel_name in self.tunnel_processes:
                 del self.tunnel_processes[tunnel_name]
 
             self.logger.info(f"隧道 {tunnel_name} 的节点离线，尝试切换到备用节点")
-
-            # Try to find an online backup node
             for backup_node in backup_nodes:
                 if API.is_node_online(backup_node, tyen="online"):
                     self.logger.info(f"正在切换到备用节点 {backup_node}")
-
-                    # Create modified tunnel_info using backup node
                     modified_tunnel = tunnel_info.copy()
                     modified_tunnel['node'] = backup_node
-
-                    # Handle domain configuration - this is the key improvement
                     success = True
                     domain_config = backup_config.get('domain')
                     if domain_config and isinstance(domain_config, dict):
@@ -5564,14 +5424,11 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                                 self.logger.warning(f"切换到备用节点 {backup_node} 时更新域名失败，但仍将继续启动隧道")
                         else:
                             self.logger.warning(f"域名配置不完整，无法更新域名记录")
-
                     if success:
                         QTimer.singleShot(0, lambda: self._start_tunnel_process(modified_tunnel))
                         return True
-
             self.logger.warning(f"隧道 {tunnel_name} 的所有备用节点都不在线")
             return False
-
         except Exception as e:
             self.logger.error(f"切换到备用节点时发生错误: {str(e)}")
             return False
@@ -5764,8 +5621,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             self.logger.error(f"更新备用节点域名时发生错误: {str(e)}")
             return False
 
-
-
     def get_tunnel_target(self, tunnel_info, node_info):
         try:
             if not tunnel_info or not node_info:
@@ -5782,30 +5637,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         except Exception as e:
             self.logger.error(f"获取隧道目标时发生错误: {str(e)}")
             return None
-
-    def show_tunnel_output(self, tunnel_name):
-        """显示隧道输出对话框"""
-        if tunnel_name not in self.tunnel_outputs:
-            self.logger.warning(f"隧道 {tunnel_name} 没有输出记录")
-            return
-
-        if not self.tunnel_outputs[tunnel_name]['dialog']:
-            self.tunnel_outputs[tunnel_name]['dialog'] = OutputDialog(self)
-
-        dialog = self.tunnel_outputs[tunnel_name]['dialog']
-
-        for run_number, output in self.tunnel_outputs[tunnel_name]['outputs_history'].items():
-            dialog.add_output(tunnel_name, output, run_number)
-
-        current_run = self.tunnel_outputs[tunnel_name]['run_number']
-        if current_run not in self.tunnel_outputs[tunnel_name]['outputs_history']:
-            current_output = self.tunnel_outputs[tunnel_name]['output']
-            dialog.add_output(tunnel_name, current_output, current_run)
-
-        dialog.setWindowTitle(f"隧道 {tunnel_name} 运行输出")
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
 
     @staticmethod
     def render_html_with_colors(text):
@@ -5826,10 +5657,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         text = re.sub(r'\033\[0;36m(.*?)(\033\[0m|\033\[0;)', r'<span style="color: cyan;">\1</span>', text)
         text = re.sub(r'\033\[0;37m(.*?)(\033\[0m|\033\[0;)', r'<span style="color: white;">\1</span>', text)
         text = re.sub(r'\033\[0m', '', text)
-
-        # html.escape 转义特殊字符（在应用颜色后执行，避免干扰HTML标签）
-        # 使用html.escape会破坏我们已经添加的HTML标签，所以需要先处理颜色，然后只转义其他内容
-
         return text
 
     def find_tunnel_by_name(self, tunnel_name):
@@ -5916,75 +5743,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
         except Exception as e:
             self.logger.error(f"设置输出捕获时发生错误: {str(e)}")
-
-    def monitor_process(self, tunnel_name, process, stdout_thread, stderr_thread):
-        """监控进程状态"""
-        try:
-            process.wait()
-            exit_code = process.poll()
-
-            # 等待输出线程完成，设置较短的超时时间
-            stdout_thread.join(timeout=3)
-            stderr_thread.join(timeout=3)
-
-            with QMutexLocker(self.output_mutex):
-                if tunnel_name in self.tunnel_outputs:
-                    try:
-                        if exit_code not in [0, 1]:  # 排除正常退出(0)和用户终止(1)的情况
-                            error_message = f"\n[E] 进程异常退出，退出代码: {exit_code}\n"
-                            if exit_code == -1073741819:  # 0xC0000005
-                                error_message += "[E] 进程访问违规 (可能是由于节点离线或网络问题)\n"
-                            self.tunnel_outputs[tunnel_name]['output'] += self.render_html(error_message)
-
-                            # 如果对话框正在显示，使用事件循环安全更新
-                            if (self.tunnel_outputs[tunnel_name]['dialog'] and
-                                    not self.tunnel_outputs[tunnel_name]['dialog'].isHidden()):
-                                dialog = self.tunnel_outputs[tunnel_name]['dialog']
-                                output = self.tunnel_outputs[tunnel_name]['output']
-                                run_number = self.tunnel_outputs[tunnel_name]['run_number']
-
-                                # 使用QMetaObject.invokeMethod安全地更新UI
-                                QMetaObject.invokeMethod(dialog, "add_output",
-                                                         Qt.ConnectionType.QueuedConnection,
-                                                         Q_ARG(str, tunnel_name),
-                                                         Q_ARG(str, output),
-                                                         Q_ARG(int, run_number))
-                    except Exception as content:
-                        self.logger.error(f"处理进程输出时发生错误: {str(content)}")
-                    finally:
-                        # 清理进程引用
-                        self.tunnel_outputs[tunnel_name]['process'] = None
-
-            # 从运行中的隧道列表中移除
-            if tunnel_name in self.tunnel_processes:
-                del self.tunnel_processes[tunnel_name]
-
-            # 安全地更新UI状态
-            QMetaObject.invokeMethod(self, "update_tunnel_card_status",
-                                     Qt.ConnectionType.QueuedConnection,
-                                     Q_ARG(str, tunnel_name),
-                                     Q_ARG(bool, False))
-
-        except Exception as content:
-            if process.poll() is None:  # 只在进程仍在运行时输出错误
-                self.logger.error(f"监控进程时发生错误(frpc进程可能已退出)")
-                print(content)
-            # 确保进程被清理
-            try:
-                if process.poll() is None:
-                    process.terminate()
-                    process.wait(timeout=1)
-            except:
-                pass
-
-    def update_output(self, tunnel_name, line):
-        obfuscated_line = self.obfuscate_sensitive_data(line)
-        self.tunnel_outputs[tunnel_name]['output'] += self.render_html(obfuscated_line)
-
-        if self.tunnel_outputs[tunnel_name]['dialog']:
-            self.tunnel_outputs[tunnel_name]['dialog'].add_output(tunnel_name,
-                                                                  self.tunnel_outputs[tunnel_name]['output'],
-                                                                  self.tunnel_outputs[tunnel_name]['run_number'])
 
     def update_tunnel_card_status(self, tunnel_name, is_running):
         for i in range(self.tunnel_container.layout().count()):
@@ -6994,7 +6752,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         elif tab_name == "node":
             self.content_stack.setCurrentIndex(3)
 
-
         # 更新所有按钮的样式
         for button in self.tab_buttons:
             button_name = button.text().lower().replace(" ", "_")
@@ -7030,24 +6787,11 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     }}
                 """)
 
-    def stop_single_tunnel(self, tunnel_name):
-        with QMutexLocker(self.running_tunnels_mutex):
-            if tunnel_name in self.running_tunnels:
-                worker = self.running_tunnels[tunnel_name]
-                worker.requestInterruption()  # 请求中断
-                if not worker.wait(5000):  # 等待最多5秒
-                    worker.terminate()
-                    worker.wait(2000)
-                del self.running_tunnels[tunnel_name]
-                self.logger.info(f"隧道 '{tunnel_name}' 已停止")
-            else:
-                self.logger.warning(f"尝试停止不存在的隧道: {tunnel_name}")
-
 class MessageDialog(QDialog):
     """消息对话框，用于显示服务器消息"""
-
     def __init__(self, token=None, parent=None):
         super().__init__(parent)
+        self.message_detail = None
         self.token = token
         self.parent = parent
         self.setWindowTitle("系统消息")
@@ -7058,22 +6802,18 @@ class MessageDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-
         # 消息列表
         self.message_list = QListWidget()
         self.message_list.setAlternatingRowColors(True)
         self.message_list.itemClicked.connect(self.show_message_detail)
         layout.addWidget(self.message_list)
-
         # 消息详情
         self.message_detail = QTextEdit()
         self.message_detail.setReadOnly(True)
         layout.addWidget(self.message_detail)
-
         # 刷新按钮
         refresh_button = QPushButton("刷新消息")
         refresh_button.clicked.connect(self.load_messages)
-
         # 关闭按钮
         close_button = QPushButton("关闭")
         close_button.clicked.connect(self.accept)
@@ -7088,16 +6828,13 @@ class MessageDialog(QDialog):
         """从API加载消息"""
         self.message_list.clear()
         self.message_detail.clear()
-
         if not self.token:
             self.message_list.addItem("请先登录后查看消息")
             return
-
         try:
             url = "http://cf-v2.uapis.cn/messages"
             params = {"token": self.token}
             headers = get_headers()
-
             response = requests.get(url, headers=headers, params=params)
             if response.status_code == 200:
                 data = response.json()
@@ -7110,28 +6847,22 @@ class MessageDialog(QDialog):
 
                     for message in messages:
                         item = QListWidgetItem()
-
                         # 判断是否为全局消息或个人消息
                         is_global = message.get('quanti') == 'yes'
-
                         # 设置消息图标
                         if is_global:
                             item.setIcon(QIcon.fromTheme("dialog-information"))
                         else:
                             item.setIcon(QIcon.fromTheme("dialog-warning"))
-
                         # 设置消息标题
                         time_str = message.get('time', '').split('T')[0]  # 简化时间格式
                         title = f"[{time_str}] {'系统公告' if is_global else '个人通知'}"
                         item.setText(title)
-
                         # 存储消息内容
                         item.setData(Qt.ItemDataRole.UserRole, message)
-
                         # 设置文字颜色
                         if not is_global:
                             item.setForeground(Qt.GlobalColor.red)
-
                         self.message_list.addItem(item)
                 else:
                     self.message_list.addItem(f"获取消息失败: {data.get('msg', '未知错误')}")
@@ -7186,7 +6917,6 @@ class MessageDialog(QDialog):
 
 class BlacklistManager:
     """管理黑名单数据的类"""
-
     def __init__(self, logger=None):
         self.blacklist = []
         self.blacklist_loaded = False
@@ -7202,12 +6932,10 @@ class BlacklistManager:
             # 检查请求是否成功
             if response.status_code == 200:
                 data = response.json()
-
                 # 检查API返回结构
                 if 'data' in data and 'list' in data['data']:
                     self.blacklist = data['data']['list']
                     self.blacklist_loaded = True
-
                     return True
                 else:
                     if self.logger:
@@ -7219,54 +6947,29 @@ class BlacklistManager:
         except Exception as e:
             if self.logger:
                 self.logger.error(f"加载黑名单时发生错误: {str(e)}")
-
         return False
-
-    def display_blacklist(self):
-        """获取格式化的黑名单列表，用于显示"""
-        if not self.blacklist_loaded:
-            if not self.load_blacklist():
-                return "无法加载黑名单数据"
-
-        if not self.blacklist:
-            return "黑名单为空"
-
-        formatted_list = []
-        for item in self.blacklist:
-            email = item.get('email', 'N/A')
-            reason = item.get('reason', '未指定原因')
-            created_date = item.get('createdAt', '未知时间')
-            updated_date = item.get('updatedAt', '未知时间')
-
-            formatted_list.append(
-                f"邮箱: {email}\n原因: {reason}\n创建日期: {created_date}\n更新日期: {updated_date}\n")
-
-        return "\n".join(formatted_list)
 
     def get_blacklist_data(self):
         """获取原始黑名单数据"""
         if not self.blacklist_loaded:
             self.load_blacklist()
-
         return self.blacklist
 
 class BlacklistDialog(QDialog):
     """黑名单信息对话框"""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
         self.blacklist_manager = BlacklistManager(logger=parent.logger if parent else None)
 
         self.setWindowTitle("黑名单列表")
-        self.setMinimumWidth(650)  # 增加宽度以容纳更多内容
+        self.setMinimumWidth(650)
         self.setMinimumHeight(500)
         self.init_ui()
         self.load_blacklist()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-
         # 搜索区域
         search_layout = QHBoxLayout()
         search_label = QLabel("搜索:")
@@ -7276,12 +6979,10 @@ class BlacklistDialog(QDialog):
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.search_input)
         layout.addLayout(search_layout)
-
         # 黑名单表格
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["邮箱", "原因", "创建日期", "更新日期"])
-
         # 设置表格列宽
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # 邮箱列自适应
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # 原因列自适应
@@ -7293,11 +6994,9 @@ class BlacklistDialog(QDialog):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
         layout.addWidget(self.table)
-
         # 统计信息
         self.stats_label = QLabel("加载中...")
         layout.addWidget(self.stats_label)
-
         # 按钮区域
         button_layout = QHBoxLayout()
         refresh_button = QPushButton("刷新")
@@ -7315,23 +7014,21 @@ class BlacklistDialog(QDialog):
         self.table.setRowCount(0)
         self.stats_label.setText("正在加载黑名单数据...")
         QApplication.processEvents()
-
         # 加载数据
         success = self.blacklist_manager.load_blacklist()
         if not success:
             self.stats_label.setText("无法加载黑名单数据，请检查网络连接")
             return
-
         # 显示数据
         self.populate_table()
 
-    def format_datetime(self, datetime_str):
+    @staticmethod
+    def format_datetime(datetime_str):
         """格式化日期时间显示"""
         if not datetime_str:
             return "未知时间"
-
         try:
-            # 将ISO格式的时间转换为更友好的显示格式
+            # 将ISO格式的时间转换
             # 输入格式: 2024-07-22T18:51:38.000+00:00
             # 输出格式: 2024-07-22 18:51:38
             date_time_parts = datetime_str.split('T')
@@ -7345,11 +7042,9 @@ class BlacklistDialog(QDialog):
         """将数据填充到表格，可选过滤条件"""
         self.table.setRowCount(0)
         blacklist = self.blacklist_manager.get_blacklist_data()
-
         if not blacklist:
             self.stats_label.setText("黑名单为空")
             return
-
         # 过滤数据
         if filter_text:
             filter_text = filter_text.lower()
@@ -7364,7 +7059,6 @@ class BlacklistDialog(QDialog):
         # 填充表格
         for row, item in enumerate(filtered_list):
             self.table.insertRow(row)
-
             # 处理可能包含多个邮箱的情况
             email = item.get('email', 'N/A')
             if ';' in email:
@@ -7375,7 +7069,7 @@ class BlacklistDialog(QDialog):
             updated_at = self.format_datetime(item.get('updatedAt', ''))
 
             email_item = QTableWidgetItem(email)
-            email_item.setToolTip(email)  # 设置工具提示，便于查看完整内容
+            email_item.setToolTip(email)  # 设置工具提示
 
             reason_item = QTableWidgetItem(reason)
             reason_item.setToolTip(reason)  # 设置工具提示
@@ -7385,7 +7079,7 @@ class BlacklistDialog(QDialog):
             self.table.setItem(row, 2, QTableWidgetItem(created_at))
             self.table.setItem(row, 3, QTableWidgetItem(updated_at))
 
-        # 允许表格行高自适应内容
+        # 表格行高自适应内容
         for row in range(self.table.rowCount()):
             self.table.resizeRowToContents(row)
 
@@ -7426,11 +7120,37 @@ class BlacklistDialog(QDialog):
             """)
 
 if __name__ == '__main__':
-    def exception_hook(exctype, value, main_thread):
-        while main_thread:
-            main_thread = main_thread.tb_next
-        sys.__excepthook__(exctype, value, main_thread)
-
+    # 从配置文件加载日志设置
+    try:
+        settings_path = get_absolute_path("settings.json")
+        if os.path.exists(settings_path):
+            with open(settings_path, 'r') as f:
+                settings = json.load(f)
+                maxBytes = settings.get('log_size_mb', 10) * 1024 * 1024  # 默认10MB
+                backupCount = settings.get('backup_count', 30)  # 默认30个备份
+        else:
+            maxBytes = 10 * 1024 * 1024  # 默认10MB
+            backupCount = 30  # 默认30个备份
+    except Exception as e:
+        print(f"加载日志设置失败: {str(e)}")
+        maxBytes = 10 * 1024 * 1024  # 默认10MB
+        backupCount = 30  # 默认30个备份
+    # 设置全局日志
+    try:
+        logger = logging.getLogger('CHMLFRP_UI')
+        logger.setLevel(logging.DEBUG)
+        file_handler = RotatingFileHandler('CHMLFRP_UI.log', maxBytes=maxBytes, backupCount=backupCount)
+        file_handler.setLevel(logging.DEBUG)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+    except Exception as e:
+        print(f"设置全局日志失败: {str(e)}")
+    # 窗口启动和文件检查
     try:
         sys.excepthook = exception_hook
         # 获取镜像地址
