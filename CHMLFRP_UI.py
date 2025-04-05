@@ -38,7 +38,6 @@ APP_VERSION = "1.6.4" # 程序版本
 PY_VERSION = "3.13.*" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
-DNS_CONFIG = {
 USER_AGENT = f"{APP_NAME}/{APP_VERSION} (Python/{PY_VERSION}; {WINDOWS_VERSION})" # 生成统一的 User-Agent
 
 # ------------------------------更新的镜像地址--------------------
