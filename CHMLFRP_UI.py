@@ -2847,23 +2847,15 @@ class BackupNodeConfigDialog(QDialog):
             if not domain_record:
                 self.logger.error(f"未找到域名记录: {record}.{domain}")
                 return False
-
-            # Get current target
             current_target = domain_record.get('target', '')
-
-            # Get node information
             node_info = self.get_node_info(node_name)
             if not node_info:
                 self.logger.error(f"无法获取节点 {node_name} 的信息")
                 return False
-
-            # Calculate expected target
             expected_target = self.get_tunnel_target(tunnel_info, node_info)
             if not expected_target:
                 self.logger.error(f"无法计算隧道 {tunnel_info.get('name', 'unknown')} 的预期目标")
                 return False
-
-            # Check if current target matches expected target
             if current_target == expected_target:
                 self.logger.info(f"域名 {record}.{domain} 当前指向正确的节点目标: {current_target}")
                 return True
@@ -3168,7 +3160,7 @@ class MainWindow(QMainWindow):
         self.auto_login()
 
     def initUI(self):
-        self.setWindowTitle(APP_NAME+" 程序")
+        self.setWindowTitle(APP_NAME+"-ChmlFrp第三方启动器")
         self.setGeometry(100, 100, 800, 600)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -3185,7 +3177,7 @@ class MainWindow(QMainWindow):
 
         title_bar = QWidget()
         title_layout = QHBoxLayout(title_bar)
-        title_label = QLabel(APP_NAME+" 程序")
+        title_label = QLabel(APP_NAME+"-ChmlFrp第三方启动器")
         title_layout.addWidget(title_label)
         title_layout.addStretch(1)
 
@@ -3236,7 +3228,7 @@ class MainWindow(QMainWindow):
 
         background_layout.addWidget(self.log_display)
 
-        author_info = QLabel("本程序基于ChmlFrp api开发 作者: boring_student")
+        author_info = QLabel("本程序基于ChmlFrp apiv2开发 作者: boring_student")
         author_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
         author_info.setStyleSheet("font-size: 7pt; color: #888888; background: transparent; padding: 2px;")
         author_info.setProperty("author_info", True)
@@ -3437,7 +3429,6 @@ class MainWindow(QMainWindow):
                 if tunnel_id not in tunnel_ids:
                     del configs[tunnel_id]
                     modified = True
-                    self.logger.info(f"移除了已删除隧道的备用节点配置: {tunnel_id}")
 
             if modified:
                 with open(config_path, 'w') as f:
@@ -3901,10 +3892,6 @@ class MainWindow(QMainWindow):
                         else:
                             # HTTP/HTTPS类型使用banddomain参数
                             payload["banddomain"] = tunnel_info["dorp"]
-
-                        # 添加调试日志
-                        self.logger.info(
-                            f"正在更新隧道 '{tunnel_info['name']}' (ID: {tunnel_id}，类型: {tunnel_type})")
 
                         # 发送请求
                         headers = get_headers(request_json=True)
@@ -5280,7 +5267,7 @@ class MainWindow(QMainWindow):
 
     CPU负载: {metrics.get('cpu', 0):.2f}%
     内存压力: {metrics.get('memory', 0):.2f}%
-    IO延迟: {metrics.get('ioLatency', 0)}
+    IO延迟: {metrics.get('ioLatency', 0):.4f}
     资源抢占: {metrics.get('steal', 0):.2f}
     线程征用: {metrics.get('threadContention', 0):.2f}
 
@@ -6129,8 +6116,55 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         try:
             result = self.create_tunnel_dialog()
             if result:
-                self.logger.info(f"信息: {result.get('msg', '无额外信息')}")
-                QMessageBox.information(self, "成功", f"信息: {result.get('msg')}")
+                if isinstance(result, dict):
+                    if "code" in result and result["code"] != 200:
+                        if "error" in result:
+                            api_message = result["error"]
+                            is_success = False
+                        elif "msg" in result:
+                            api_message = result["msg"]
+                            is_success = False
+                        else:
+                            api_message = str(result)
+                            is_success = False
+                    else:
+                        api_message = result.get("msg", "隧道添加成功")
+                        is_success = True
+                elif isinstance(result, str):
+                    try:
+                        import json
+                        parsed = json.loads(result)
+                        if isinstance(parsed, dict):
+                            if "error" in parsed:
+                                api_message = parsed["error"]
+                                is_success = False
+                            elif "msg" in parsed:
+                                api_message = parsed["msg"]
+                                is_success = (parsed.get("code", 0) == 200)
+                            else:
+                                api_message = result
+                                is_success = True
+                        else:
+                            api_message = result
+                            is_success = True
+                    except json.JSONDecodeError:
+                        api_message = result
+                        is_success = True
+                else:
+                    api_message = str(result)
+                    is_success = True
+                if isinstance(api_message, str) and '\\u' in api_message:
+                    try:
+                        api_message = api_message.encode('latin1').decode('unicode_escape')
+                    except Exception as decode_error:
+                        self.logger.warning(f"无法解码API消息: {str(decode_error)}")
+                if is_success:
+                    self.logger.info(f"添加隧道成功: {api_message}")
+                    QMessageBox.information(self, "隧道添加", api_message)
+                else:
+                    self.logger.warning(f"添加隧道失败: {api_message}")
+                    QMessageBox.warning(self, "隧道添加", api_message)
+
                 self.load_tunnels()
         except Exception as e:
             self.logger.error(f"添加隧道失败: {str(e)}")
@@ -6148,7 +6182,57 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         try:
             result = self.create_tunnel_dialog(self.selected_tunnels[0])
             if result:
-                self.logger.info("隧道更新成功")
+                if isinstance(result, dict):
+                    if "code" in result and result["code"] != 200:
+                        if "error" in result:
+                            api_message = result["error"]
+                            is_success = False
+                        elif "msg" in result:
+                            api_message = result["msg"]
+                            is_success = False
+                        else:
+                            api_message = str(result)
+                            is_success = False
+                    else:
+                        api_message = result.get("msg", "隧道更新成功")
+                        is_success = True
+                elif isinstance(result, str):
+                    try:
+                        import json
+                        parsed = json.loads(result)
+                        if isinstance(parsed, dict):
+                            if "error" in parsed:
+                                api_message = parsed["error"]
+                                is_success = False
+                            elif "msg" in parsed:
+                                api_message = parsed["msg"]
+                                is_success = (parsed.get("code", 0) == 200)
+                            else:
+                                api_message = result
+                                is_success = True
+                        else:
+                            api_message = result
+                            is_success = True
+                    except json.JSONDecodeError:
+                        api_message = result
+                        is_success = True
+                else:
+                    api_message = str(result)
+                    is_success = True
+
+                if isinstance(api_message, str) and '\\u' in api_message:
+                    try:
+                        api_message = api_message.encode('latin1').decode('unicode_escape')
+                    except Exception as decode_error:
+                        self.logger.warning(f"无法解码API消息: {str(decode_error)}")
+
+                if is_success:
+                    self.logger.info(f"隧道更新成功: {api_message}")
+                    QMessageBox.information(self, "隧道更新", api_message)
+                else:
+                    self.logger.warning(f"隧道更新失败: {api_message}")
+                    QMessageBox.warning(self, "隧道更新", api_message)
+
                 self.load_tunnels()
         except Exception as e:
             self.logger.error(f"编辑隧道失败: {str(e)}")
