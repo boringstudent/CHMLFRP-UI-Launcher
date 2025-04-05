@@ -6132,7 +6132,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                         is_success = True
                 elif isinstance(result, str):
                     try:
-                        import json
                         parsed = json.loads(result)
                         if isinstance(parsed, dict):
                             if "error" in parsed:
@@ -6198,7 +6197,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                         is_success = True
                 elif isinstance(result, str):
                     try:
-                        import json
                         parsed = json.loads(result)
                         if isinstance(parsed, dict):
                             if "error" in parsed:
@@ -7197,8 +7195,6 @@ class BlacklistManager:
     def load_blacklist(self):
         """加载黑名单数据"""
         try:
-            import requests
-
             # 使用内网穿透.中国 的黑名单API
             url = "https://xn--6orp08a.xn--v6qw21h0gd43u.xn--fiqs8s/v1/blacklist/list/all"
             response = requests.get(url, timeout=10)
