@@ -863,7 +863,6 @@ class TunnelCard(QFrame):
             self.setStyleSheet(self.styleSheet().replace(
                 "TunnelCard { border: 2px solid #0066cc; background-color: rgba(224, 224, 224, 50); }", ""))
 
-
 class BatchEditDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1337,10 +1336,74 @@ class SettingsDialog(QDialog):
         general_tab = QWidget()
         general_layout = QVBoxLayout(general_tab)
 
-        # 自启动选项
-        self.autostart_checkbox = QCheckBox("开机自启动")
-        self.autostart_checkbox.stateChanged.connect(self.toggle_autostart)
-        general_layout.addWidget(self.autostart_checkbox)
+        # 自启动选项组
+        autostart_group = QGroupBox("开机自启动设置")
+        autostart_layout = QVBoxLayout()
+
+        # 启动方式选择
+        method_layout = QFormLayout()
+        self.autostart_method = QComboBox()
+        self.autostart_method.addItems(["禁用自启动", "注册表启动项", "系统服务(NSSM)", "计划任务"])
+        self.autostart_method.currentIndexChanged.connect(self.on_autostart_method_changed)
+        method_layout.addRow("启动方式:", self.autostart_method)
+        autostart_layout.addLayout(method_layout)
+
+        # 启动参数框架
+        self.startup_options_frame = QFrame()
+        startup_options_layout = QFormLayout(self.startup_options_frame)
+
+        # 延迟启动选项
+        self.delay_spinbox = QSpinBox()
+        self.delay_spinbox.setMinimum(0)
+        self.delay_spinbox.setMaximum(300)
+        self.delay_spinbox.setValue(1)
+        self.delay_spinbox.setSuffix(" 秒")
+        startup_options_layout.addRow("延迟启动:", self.delay_spinbox)
+
+        # 启动时最小化到托盘
+        self.minimize_to_tray = QCheckBox("启动时隐藏到系统托盘")
+        startup_options_layout.addRow("", self.minimize_to_tray)
+
+        # 自动检查更新
+        self.auto_check_update = QCheckBox("启动时自动检查更新")
+        startup_options_layout.addRow("", self.auto_check_update)
+
+        autostart_layout.addWidget(self.startup_options_frame)
+
+        # NSSM 下载按钮
+        self.nssm_frame = QFrame()
+        nssm_layout = QHBoxLayout(self.nssm_frame)
+        self.nssm_status_label = QLabel("需要下载NSSM工具进行服务安装")
+        self.nssm_status_label.setStyleSheet("color: #FF6600;")
+        self.download_nssm_button = QPushButton("下载NSSM")
+        self.download_nssm_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 5px 15px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.download_nssm_button.clicked.connect(self.download_nssm)
+        nssm_layout.addWidget(self.nssm_status_label)
+        nssm_layout.addWidget(self.download_nssm_button)
+        nssm_layout.addStretch()
+        autostart_layout.addWidget(self.nssm_frame)
+        self.nssm_frame.hide()
+
+        # 添加说明信息
+        self.startup_info = QLabel()
+        self.startup_info.setWordWrap(True)
+        self.startup_info.setStyleSheet("color: gray; font-size: 10px;")
+        autostart_layout.addWidget(self.startup_info)
+
+        autostart_group.setLayout(autostart_layout)
+        general_layout.addWidget(autostart_group)
 
         # 主题设置
         theme_group = QGroupBox("主题设置")
@@ -1481,16 +1544,6 @@ class SettingsDialog(QDialog):
         about_layout.addStretch()
         tab_widget.addTab(about_tab, "关于")
 
-        # === 底部按钮 ===
-        button_layout = QHBoxLayout()
-        save_button = QPushButton("保存")
-        save_button.clicked.connect(self.save_settings)
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        button_layout.addWidget(save_button)
-        button_layout.addWidget(cancel_button)
-        layout.addLayout(button_layout)
-
         # === 消息推送标签页 ===
         notification_tab = QWidget()
         notification_layout = QVBoxLayout(notification_tab)
@@ -1545,6 +1598,600 @@ class SettingsDialog(QDialog):
         notification_layout.addStretch()
 
         tab_widget.addTab(notification_tab, "消息推送")
+
+        # === 底部按钮 ===
+        button_layout = QHBoxLayout()
+        save_button = QPushButton("保存")
+        save_button.clicked.connect(self.save_settings)
+        cancel_button = QPushButton("取消")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+
+    def on_autostart_method_changed(self, index):
+        """当自启动方式更改时更新UI"""
+        # 启用/禁用启动选项
+        self.startup_options_frame.setEnabled(index > 0)
+
+        # 显示/隐藏NSSM下载框（仅当选择了系统服务且NSSM不存在时）
+        if index == 2:  # 当选择系统服务(NSSM)时
+            # 检查NSSM是否已存在
+            nssm_64bit_path = get_absolute_path("nssm-2.24\\win64\\nssm.exe")
+            nssm_32bit_path = get_absolute_path("nssm-2.24\\win32\\nssm.exe")
+
+            if os.path.exists(nssm_64bit_path) or os.path.exists(nssm_32bit_path):
+                # NSSM已存在，显示已安装提示
+                self.nssm_status_label.setText("NSSM工具已安装 ✓")
+                self.nssm_status_label.setStyleSheet("color: green; font-weight: bold;")
+                self.download_nssm_button.hide()
+                self.nssm_frame.show()
+            else:
+                # NSSM不存在，显示下载按钮
+                self.nssm_status_label.setText("需要下载NSSM工具进行服务安装")
+                self.nssm_status_label.setStyleSheet("color: #FF6600;")
+                self.download_nssm_button.show()
+                self.nssm_frame.show()
+        else:
+            # 其他选项时隐藏NSSM框
+            self.nssm_frame.hide()
+
+        # 更新说明信息
+        info_texts = [
+            "自启动已禁用，程序将不会在Windows启动时自动运行。",
+            "使用Windows注册表启动项方式，适用于大多数用户。程序将作为普通应用程序在用户登录后启动，权限与当前用户相同。",
+            "使用NSSM创建Windows服务，程序将作为系统服务在后台运行，即使用户未登录也能工作。适合服务器环境，需要管理员权限。",
+            "使用Windows计划任务，可以设置更精确的启动条件和权限。适合需要特定条件下启动的情况。"
+        ]
+        self.startup_info.setText(info_texts[index])
+
+    def download_nssm(self):
+        """下载NSSM工具，美化版本"""
+        try:
+            # 创建自定义进度对话框
+            progress_dialog = QDialog(self)
+            progress_dialog.setWindowTitle("下载NSSM")
+            progress_dialog.setFixedSize(450, 150)
+            # 避免使用可能不兼容的标志，简单使用默认标志
+
+            # 布局
+            layout = QVBoxLayout(progress_dialog)
+
+            # 标题标签
+            title_label = QLabel("正在下载 NSSM 2.24...")
+            title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 10px;")
+            layout.addWidget(title_label)
+
+            # 进度条
+            progress_bar = QProgressBar()
+            progress_bar.setRange(0, 100)
+            progress_bar.setValue(0)
+            progress_bar.setTextVisible(True)
+            progress_bar.setFormat("%p% - %v KB / %m KB")
+            progress_bar.setStyleSheet("""
+                QProgressBar {
+                    border: 1px solid #CCCCCC;
+                    border-radius: 5px;
+                    background-color: #F5F5F5;
+                    text-align: center;
+                    height: 20px;
+                    margin: 10px 0px;
+                }
+                QProgressBar::chunk {
+                    background-color: #4CAF50;
+                    border-radius: 4px;
+                }
+            """)
+            layout.addWidget(progress_bar)
+
+            # 状态标签
+            status_label = QLabel("正在连接到下载服务器...")
+            status_label.setStyleSheet("color: #666666;")
+            layout.addWidget(status_label)
+
+            # 按钮
+            button_layout = QHBoxLayout()
+            cancel_button = QPushButton("取消")
+            cancel_button.clicked.connect(progress_dialog.reject)
+            cancel_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #F44336;
+                    color: white;
+                    border: none;
+                    padding: 5px 15px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #E53935;
+                }
+            """)
+            button_layout.addStretch()
+            button_layout.addWidget(cancel_button)
+            layout.addLayout(button_layout)
+
+            # 显示对话框（非模态，允许用户交互）
+            progress_dialog.setModal(False)
+            progress_dialog.show()
+
+            # 下载逻辑
+            nssm_url = "https://nssm.cc/release/nssm-2.24.zip"
+            download_path = get_absolute_path("nssm-2.24.zip")
+
+            # 创建下载目录（如果不存在）
+            download_dir = os.path.dirname(download_path)
+            if not os.path.exists(download_dir):
+                os.makedirs(download_dir)
+
+            # 记录开始时间（用于计算下载速度）
+            import time
+            start_time = time.time()
+
+            # 下载文件函数
+            def download_file():
+                try:
+                    import requests
+
+                    # 更新状态
+                    status_label.setText("正在连接到下载服务器...")
+                    QApplication.processEvents()
+
+                    # 设置下载超时
+                    response = requests.get(nssm_url, stream=True, timeout=30)
+                    response.raise_for_status()
+
+                    total_size = int(response.headers.get('content-length', 0))
+                    total_kb = total_size / 1024
+                    progress_bar.setMaximum(int(total_kb))
+
+                    block_size = 1024
+                    downloaded = 0
+
+                    status_label.setText(f"正在从 nssm.cc 下载 NSSM 工具...")
+
+                    with open(download_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=block_size):
+                            if progress_dialog.isHidden():
+                                # 用户取消下载
+                                f.close()
+                                if os.path.exists(download_path):
+                                    os.remove(download_path)
+                                return False
+
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                kb_downloaded = downloaded / 1024
+                                progress_bar.setValue(int(kb_downloaded))
+                                speed = kb_downloaded / (time.time() - start_time) if time.time() > start_time else 0
+                                status_label.setText(
+                                    f"下载速度: {speed:.1f} KB/s - 已完成: {(kb_downloaded / total_kb) * 100:.1f}%")
+
+                            QApplication.processEvents()
+                            time.sleep(0.01)  # 防止UI冻结
+
+                    progress_bar.setValue(progress_bar.maximum())
+                    status_label.setText("下载完成，正在解压文件...")
+                    QApplication.processEvents()
+
+                    # 等待一会儿显示100%
+                    time.sleep(0.5)
+
+                    return True
+
+                except requests.exceptions.RequestException as e:
+                    status_label.setText(f"下载错误: {str(e)}")
+                    QApplication.processEvents()
+                    time.sleep(2)
+                    progress_dialog.reject()
+                    return False
+                except Exception as e:
+                    status_label.setText(f"未知错误: {str(e)}")
+                    QApplication.processEvents()
+                    time.sleep(2)
+                    progress_dialog.reject()
+                    return False
+
+            # 在后台线程中下载
+            import threading
+            download_thread = threading.Thread(target=download_file)
+            download_thread.daemon = True
+            download_thread.start()
+
+            # 主线程等待下载完成或对话框关闭
+            while download_thread.is_alive() and not progress_dialog.isHidden():
+                QApplication.processEvents()
+                time.sleep(0.1)
+
+            # 如果对话框已关闭但下载线程仍在运行，等待线程完成
+            if download_thread.is_alive() and progress_dialog.isHidden():
+                download_thread.join(1)  # 给下载线程最多1秒钟清理资源
+
+            # 如果下载完成并且文件存在，解压文件
+            if os.path.exists(download_path) and not progress_dialog.isHidden():
+                try:
+                    import zipfile
+
+                    # 更新状态
+                    progress_bar.setRange(0, 0)  # 不确定模式
+                    status_label.setText("正在解压文件...")
+                    QApplication.processEvents()
+
+                    # 解压文件
+                    with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                        extract_path = get_absolute_path("")
+                        zip_ref.extractall(extract_path)
+
+                    # 删除压缩包
+                    os.remove(download_path)
+
+                    # 验证安装
+                    nssm_64bit_path = get_absolute_path("nssm-2.24\\win64\\nssm.exe")
+                    nssm_32bit_path = get_absolute_path("nssm-2.24\\win32\\nssm.exe")
+
+                    if os.path.exists(nssm_64bit_path) or os.path.exists(nssm_32bit_path):
+                        status_label.setText("NSSM 已成功安装!")
+                        progress_bar.setRange(0, 100)
+                        progress_bar.setValue(100)
+                        QApplication.processEvents()
+
+                        # 等待一会儿显示成功消息
+                        time.sleep(1)
+                        progress_dialog.accept()
+
+                        # 更新NSSM状态显示
+                        self.nssm_status_label.setText("NSSM工具已安装 ✓")
+                        self.nssm_status_label.setStyleSheet("color: green; font-weight: bold;")
+                        self.download_nssm_button.hide()
+
+                        QMessageBox.information(
+                            self,
+                            "安装成功",
+                            "NSSM已成功安装。您现在可以使用系统服务方式设置自启动。"
+                        )
+                    else:
+                        status_label.setText("安装验证失败!")
+                        QApplication.processEvents()
+                        time.sleep(1)
+                        progress_dialog.reject()
+
+                        QMessageBox.warning(
+                            self,
+                            "安装警告",
+                            "NSSM文件已下载并解压，但未能找到可执行文件。请检查安装目录。"
+                        )
+
+                except Exception as e:
+                    status_label.setText(f"解压错误: {str(e)}")
+                    QApplication.processEvents()
+                    time.sleep(1)
+                    progress_dialog.reject()
+
+                    QMessageBox.warning(self, "解压错误", f"解压NSSM时发生错误: {str(e)}")
+
+        except Exception as e:
+            self.parent.logger.error(f"下载NSSM时发生错误: {str(e)}")
+            QMessageBox.warning(self, "错误", f"下载NSSM时发生错误: {str(e)}")
+
+    def check_autostart_status(self):
+        """检查当前各种自启动方式的状态"""
+        try:
+            # 检查注册表启动项
+            if sys.platform == "win32":
+                try:
+                    key = winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER,
+                        r"Software\Microsoft\Windows\CurrentVersion\Run",
+                        0,
+                        winreg.KEY_READ
+                    )
+                    try:
+                        winreg.QueryValueEx(key, "ChmlFrpUI")
+                        # 如果找到注册表项，且当前选择不是注册表方式，则提示用户
+                        if self.autostart_method.currentIndex() != 1:
+                            self.parent.logger.info("检测到注册表自启动项已存在，但当前未选择注册表启动方式")
+                    except WindowsError:
+                        # 如果当前选择是注册表方式，但注册表项不存在，则提示
+                        if self.autostart_method.currentIndex() == 1:
+                            self.parent.logger.info("当前选择了注册表启动方式，但注册表项不存在")
+                    winreg.CloseKey(key)
+                except WindowsError:
+                    pass
+
+            # 检查服务
+            service_exists = self.check_service_exists("ChmlFrpUI")
+            if service_exists and self.autostart_method.currentIndex() != 2:
+                self.parent.logger.info("检测到ChmlFrpUI服务已存在，但当前未选择服务启动方式")
+            elif not service_exists and self.autostart_method.currentIndex() == 2:
+                self.parent.logger.info("当前选择了服务启动方式，但服务不存在")
+
+            # 检查计划任务
+            task_exists = self.check_task_exists("ChmlFrpUI")
+            if task_exists and self.autostart_method.currentIndex() != 3:
+                self.parent.logger.info("检测到ChmlFrpUI计划任务已存在，但当前未选择计划任务启动方式")
+            elif not task_exists and self.autostart_method.currentIndex() == 3:
+                self.parent.logger.info("当前选择了计划任务启动方式，但计划任务不存在")
+
+        except Exception as e:
+            self.parent.logger.error(f"检查自启动状态失败: {str(e)}")
+
+    def check_service_exists(self, service_name):
+        """检查服务是否存在"""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['sc', 'query', service_name],
+                capture_output=True,
+                text=True
+            )
+            return "RUNNING" in result.stdout or "STOPPED" in result.stdout
+        except Exception:
+            return False
+
+    def check_task_exists(self, task_name):
+        """检查计划任务是否存在"""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['schtasks', '/query', '/tn', task_name],
+                capture_output=True,
+                text=True
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def apply_autostart_settings(self, method, delay, minimize, auto_update):
+        """应用自启动设置"""
+        try:
+            # 获取程序路径
+            if getattr(sys, 'frozen', False):
+                # 如果是打包后的 exe
+                program_path = sys.executable
+            else:
+                # 如果是 Python 脚本
+                program_path = f"{sys.executable} {os.path.abspath(sys.argv[0])}"
+
+            # 根据启动参数构建命令行选项
+            startup_args = []
+            if delay > 0:
+                startup_args.append(f"--delay={delay}")
+            if minimize:
+                startup_args.append("--minimize")
+            if auto_update:
+                startup_args.append("--check-update")
+
+            cmd_args = " ".join(startup_args)
+            full_command = f'"{program_path}" {cmd_args}'
+
+            # 清除所有现有自启动方式
+            self.remove_all_autostart()
+
+            # 根据选择的方式设置自启动
+            if method == 1:
+                # 注册表启动项
+                self.setup_registry_autostart(full_command)
+            elif method == 2:
+                # 系统服务(NSSM)
+                self.setup_service_autostart(program_path, cmd_args)
+            elif method == 3:
+                # 计划任务
+                self.setup_task_autostart(full_command)
+
+        except Exception as e:
+            self.parent.logger.error(f"应用自启动设置失败: {str(e)}")
+            raise
+
+    def remove_all_autostart(self):
+        """移除所有自启动方式"""
+        try:
+            # 移除注册表启动项
+            if sys.platform == "win32":
+                try:
+                    key = winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER,
+                        r"Software\Microsoft\Windows\CurrentVersion\Run",
+                        0,
+                        winreg.KEY_WRITE
+                    )
+                    try:
+                        winreg.DeleteValue(key, "ChmlFrpUI")
+                    except WindowsError:
+                        pass
+                    winreg.CloseKey(key)
+                except WindowsError:
+                    pass
+
+            # 移除服务
+            if self.check_service_exists("ChmlFrpUI"):
+                import subprocess
+                subprocess.run(
+                    ['sc', 'stop', 'ChmlFrpUI'],
+                    capture_output=True
+                )
+                subprocess.run(
+                    ['sc', 'delete', 'ChmlFrpUI'],
+                    capture_output=True
+                )
+
+            # 移除计划任务
+            if self.check_task_exists("ChmlFrpUI"):
+                import subprocess
+                subprocess.run(
+                    ['schtasks', '/delete', '/tn', 'ChmlFrpUI', '/f'],
+                    capture_output=True
+                )
+
+        except Exception as e:
+            self.parent.logger.error(f"移除自启动项失败: {str(e)}")
+
+    def setup_registry_autostart(self, command):
+        """设置注册表自启动"""
+        if sys.platform == "win32":
+            try:
+                key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Software\Microsoft\Windows\CurrentVersion\Run",
+                    0,
+                    winreg.KEY_WRITE
+                )
+                winreg.SetValueEx(key, "ChmlFrpUI", 0, winreg.REG_SZ, command)
+                winreg.CloseKey(key)
+                self.parent.logger.info("已设置注册表自启动项")
+            except Exception as e:
+                self.parent.logger.error(f"设置注册表自启动项失败: {str(e)}")
+                raise
+
+    def setup_service_autostart(self, program_path, args):
+        """使用NSSM设置系统服务自启动"""
+        try:
+            # 检查NSSM是否存在
+            nssm_path = get_absolute_path("nssm-2.24\\win64\\nssm.exe")
+            if not os.path.exists(nssm_path):
+                # 尝试查找32位版本
+                nssm_path = get_absolute_path("nssm-2.24\\win32\\nssm.exe")
+                if not os.path.exists(nssm_path):
+                    raise FileNotFoundError("未找到NSSM工具，请先下载")
+
+            # 创建服务
+            import subprocess
+            # 移除可能存在的旧服务
+            subprocess.run(
+                [nssm_path, 'stop', 'ChmlFrpUI'],
+                capture_output=True
+            )
+            subprocess.run(
+                [nssm_path, 'remove', 'ChmlFrpUI', 'confirm'],
+                capture_output=True
+            )
+
+            # 创建新服务
+            result = subprocess.run(
+                [nssm_path, 'install', 'ChmlFrpUI', program_path] + args.split(),
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                raise Exception(f"创建服务失败: {result.stderr}")
+
+            # 设置服务描述
+            subprocess.run(
+                [nssm_path, 'set', 'ChmlFrpUI', 'Description', 'CHMLFRP UI Launcher 自动启动服务'],
+                capture_output=True
+            )
+
+            # 设置服务自动启动
+            subprocess.run(
+                [nssm_path, 'set', 'ChmlFrpUI', 'Start', 'AUTO'],
+                capture_output=True
+            )
+
+            # 设置工作目录
+            work_dir = os.path.dirname(program_path)
+            subprocess.run(
+                [nssm_path, 'set', 'ChmlFrpUI', 'AppDirectory', work_dir],
+                capture_output=True
+            )
+
+            # 启动服务
+            subprocess.run(
+                [nssm_path, 'start', 'ChmlFrpUI'],
+                capture_output=True
+            )
+
+            self.parent.logger.info("已设置系统服务自启动")
+
+        except Exception as e:
+            self.parent.logger.error(f"设置系统服务自启动失败: {str(e)}")
+            raise
+
+    def setup_task_autostart(self, command):
+        """设置计划任务自启动"""
+        try:
+            import subprocess
+
+            # 获取当前用户名
+            import getpass
+            user_name = getpass.getuser()
+
+            # 设置工作目录
+            work_dir = os.path.dirname(
+                sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(sys.argv[0]))
+
+            # 创建XML格式的任务定义
+            xml_path = get_absolute_path("ChmlFrpUI_Task.xml")
+
+            xml_content = f"""<?xml version="1.0" encoding="UTF-16"?>
+    <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+      <RegistrationInfo>
+        <Description>CHMLFRP UI自动启动任务</Description>
+      </RegistrationInfo>
+      <Triggers>
+        <LogonTrigger>
+          <Enabled>true</Enabled>
+          <UserId>{user_name}</UserId>
+        </LogonTrigger>
+      </Triggers>
+      <Principals>
+        <Principal id="Author">
+          <UserId>{user_name}</UserId>
+          <LogonType>InteractiveToken</LogonType>
+          <RunLevel>HighestAvailable</RunLevel>
+        </Principal>
+      </Principals>
+      <Settings>
+        <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+        <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+        <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+        <AllowHardTerminate>true</AllowHardTerminate>
+        <StartWhenAvailable>false</StartWhenAvailable>
+        <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+        <IdleSettings>
+          <StopOnIdleEnd>false</StopOnIdleEnd>
+          <RestartOnIdle>false</RestartOnIdle>
+        </IdleSettings>
+        <AllowStartOnDemand>true</AllowStartOnDemand>
+        <Enabled>true</Enabled>
+        <Hidden>false</Hidden>
+        <RunOnlyIfIdle>false</RunOnlyIfIdle>
+        <WakeToRun>false</WakeToRun>
+        <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+        <Priority>7</Priority>
+      </Settings>
+      <Actions Context="Author">
+        <Exec>
+          <Command>{command.split()[0].strip('"')}</Command>
+          <Arguments>{" ".join(command.split()[1:])}</Arguments>
+          <WorkingDirectory>{work_dir}</WorkingDirectory>
+        </Exec>
+      </Actions>
+    </Task>
+    """
+
+            with open(xml_path, 'w', encoding='utf-16') as f:
+                f.write(xml_content)
+
+            # 导入任务
+            result = subprocess.run(
+                ['schtasks', '/create', '/tn', 'ChmlFrpUI', '/xml', xml_path, '/f'],
+                capture_output=True,
+                text=True
+            )
+
+            # 删除临时XML文件
+            try:
+                os.remove(xml_path)
+            except:
+                pass
+
+            if result.returncode != 0:
+                raise Exception(f"创建计划任务失败: {result.stderr}")
+
+            self.parent.logger.info("已设置计划任务自启动")
+
+        except Exception as e:
+            self.parent.logger.error(f"设置计划任务自启动失败: {str(e)}")
+            raise
 
     def update_mail_config(self, index):
         """当选择预设服务时自动填充配置"""
@@ -1715,25 +2362,6 @@ class SettingsDialog(QDialog):
             settings_content = {}
             self.parent.logger.info("未找到配置文件或配置文件无效，将使用默认设置")
 
-        # 读取自启动状态
-        if sys.platform == "win32":
-            try:
-                key = winreg.OpenKey(
-                    winreg.HKEY_CURRENT_USER,
-                    r"Software\Microsoft\Windows\CurrentVersion\Run",
-                    0,
-                    winreg.KEY_READ
-                )
-                try:
-                    winreg.QueryValueEx(key, "ChmlFrpUI")
-                    self.autostart_checkbox.setChecked(True)
-                except WindowsError:
-                    self.autostart_checkbox.setChecked(False)
-                winreg.CloseKey(key)
-            except WindowsError as content:
-                self.parent.logger.error(f"读取自启动设置失败: {str(content)}")
-                self.autostart_checkbox.setChecked(False)
-
         # 加载日志设置
         try:
             log_size = settings_content.get('log_size_mb')
@@ -1825,6 +2453,24 @@ class SettingsDialog(QDialog):
         self.tunnel_start_check.setChecked(notify_settings.get('tunnel_start', False))
         self.node_online_check.setChecked(notify_settings.get('node_online', False))
 
+        # 加载自启动方式和选项
+        try:
+            # 加载自启动方式
+            autostart_config = settings_content.get('autostart', {})
+            method = autostart_config.get('method', 0)  # 默认禁用
+            self.autostart_method.setCurrentIndex(method)
+
+            # 加载启动选项
+            self.delay_spinbox.setValue(autostart_config.get('delay_seconds', 1))
+            self.minimize_to_tray.setChecked(autostart_config.get('minimize_to_tray', False))
+            self.auto_check_update.setChecked(autostart_config.get('auto_check_update', False))
+
+            # 检查当前设置的激活状态
+            self.check_autostart_status()
+
+        except Exception as e:
+            self.parent.logger.error(f"加载自启动设置失败: {str(e)}")
+
     def toggle_autostart(self, state):
         if sys.platform == "win32":
             try:
@@ -1880,9 +2526,34 @@ class SettingsDialog(QDialog):
                         tunnel_id = item.data(Qt.ItemDataRole.UserRole)
                         auto_start_tunnels.append(tunnel_id)
 
+            # 获取主题设置
+            theme_setting = self.get_selected_theme()
+
+            # 获取邮件配置
+            mail_config = self.get_mail_config()
+
+            # 获取自启动设置
+            autostart_method = self.autostart_method.currentIndex()
+            delay_seconds = self.delay_spinbox.value()
+            minimize_to_tray = self.minimize_to_tray.isChecked()
+            auto_check_update = self.auto_check_update.isChecked()
+
+            autostart_config = {
+                'method': autostart_method,
+                'delay_seconds': delay_seconds,
+                'minimize_to_tray': minimize_to_tray,
+                'auto_check_update': auto_check_update
+            }
+
             settings_pathway = get_absolute_path("settings.json")
-            settings_content = {'auto_start_tunnels': auto_start_tunnels, 'theme': self.get_selected_theme(),
-                                'log_size_mb': log_size, 'backup_count': backup_count, 'mail': self.get_mail_config()}
+            settings_content = {
+                'auto_start_tunnels': auto_start_tunnels,
+                'theme': theme_setting,
+                'log_size_mb': log_size,
+                'backup_count': backup_count,
+                'mail': mail_config,
+                'autostart': autostart_config
+            }
 
             with open(settings_pathway, 'w') as file_contents:
                 json.dump(settings_content, file_contents)
@@ -1899,12 +2570,14 @@ class SettingsDialog(QDialog):
                 self.parent.dark_theme = (self.get_selected_theme() == 'dark')
             self.parent.apply_theme()
 
+            # 应用自启动设置
+            self.apply_autostart_settings(autostart_method, delay_seconds, minimize_to_tray, auto_check_update)
+
             QMessageBox.information(self, "成功", "设置已保存")
             self.accept()
 
         except Exception as content:
             QMessageBox.warning(self, "错误", f"保存设置失败: {str(content)}")
-
 
 class UpdateCheckerDialog(QDialog):
     def __init__(self, parent=None):
@@ -4612,10 +5285,6 @@ class MainWindow(QMainWindow):
                     else:
                         if "找不到" in stderr:
                             self.logger.info("没有找到frpc.exe进程")
-                            QMessageBox.information(self, "清除结果", "没有找到正在运行的frpc.exe进程")
-                        else:
-                            self.logger.error(f"清除frpc.exe进程失败: {stderr}")
-                            QMessageBox.warning(self, "清除失败", f"清除frpc.exe进程失败:\n{stderr}")
 
                 except subprocess.CalledProcessError as e:
                     if "没有找到" in str(e) or "not found" in str(e).lower():
@@ -5478,17 +6147,32 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                             run_number = self.tunnel_outputs[tunnel_name]['run_number']
                             QTimer.singleShot(0, lambda: dialog.add_output(tunnel_name, output, run_number))
 
+                        # 获取完整HTML格式的日志
+                        log_html = self.tunnel_outputs[tunnel_name]['output']
+                        # 限制日志长度
+                        max_log_length = 2000
+                        if len(log_html) > max_log_length:
+                            log_html = "..." + log_html[-max_log_length:]
+
                 with self.process_lock:
                     if tunnel_name in self.tunnel_processes:
                         del self.tunnel_processes[tunnel_name]
 
                 QTimer.singleShot(0, lambda: self.update_tunnel_card_status(tunnel_name, False))
 
-                self.send_notification("tunnel_offline",
-                                       f"隧道 {tunnel_name} 异常停止\n"
-                                       f"退出代码: {exit_code}\n"
-                                       f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                                       tunnel_name)
+                # 发送带有HTML格式日志的通知
+                notification_html = f"""
+                <h3>隧道 {tunnel_name} 异常停止</h3>
+                <p><b>退出代码:</b> {exit_code}</p>
+                <p><b>时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p><b>错误信息:</b> <span style="color: red;">{error_message}</span></p>
+                <p><b>日志内容:</b></p>
+                <div style="border: 1px solid #ddd; padding: 8px; background-color: #f8f8f8; max-height: 300px; overflow-y: auto;">
+                {log_html}
+                </div>
+                """
+
+                self.send_notification("tunnel_offline", notification_html, tunnel_name)
 
                 QTimer.singleShot(100, self.load_tunnels)
                 return
@@ -6037,7 +6721,19 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
             process = self.tunnel_processes[tunnel_name]
 
             if process.poll() is not None:
+                exit_code = process.returncode
                 self.logger.info(f"隧道 {tunnel_name} 已停止, 退出代码: {process.returncode}")
+
+                # 获取隧道的日志内容
+                log_html = ""
+                with QMutexLocker(self.output_mutex):
+                    if tunnel_name in self.tunnel_outputs:
+                        # 保留HTML格式的日志内容
+                        log_html = self.tunnel_outputs[tunnel_name]['output']
+                        # 限制日志长度
+                        max_log_length = 2000
+                        if len(log_html) > max_log_length:
+                            log_html = "..." + log_html[-max_log_length:]
 
                 with self.process_lock:
                     if tunnel_name in self.tunnel_processes:
@@ -6045,10 +6741,18 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
                 self.update_tunnel_card_status(tunnel_name, False)
 
-                self.send_notification("tunnel_stop",
-                                       f"隧道 {tunnel_name} 已停止运行\n" +
-                                       f"退出代码: {process.returncode}",
-                                       tunnel_name)
+                # 发送带有HTML格式日志的通知
+                notification_html = f"""
+                <h3>隧道 {tunnel_name} 已停止运行</h3>
+                <p><b>退出代码:</b> {exit_code}</p>
+                <p><b>时间:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p><b>日志内容:</b></p>
+                <div style="border: 1px solid #ddd; padding: 8px; background-color: #f8f8f8; max-height: 300px; overflow-y: auto;">
+                {log_html}
+                </div>
+                """
+
+                self.send_notification("tunnel_offline", notification_html, tunnel_name)
             else:
                 QTimer.singleShot(1000, lambda: self.check_tunnel_status(tunnel_name))
 
