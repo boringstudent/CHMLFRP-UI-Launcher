@@ -1770,7 +1770,7 @@ class SettingsDialog(QDialog):
             # 清除现有项目
             self.tunnel_list.clear()
 
-            # 获取自动启动的隧道列表
+            # 获取自动启动的隧道ID列表
             auto_start_tunnels = settings_content.get('auto_start_tunnels', [])
 
             if self.parent.token:
@@ -1778,11 +1778,25 @@ class SettingsDialog(QDialog):
                 tunnels = API.get_user_tunnels(self.parent.token)
                 if tunnels:
                     for tunnel in tunnels:
-                        item = QListWidgetItem(tunnel['name'])
+                        # 创建带有隧道名称和备注的项目
+                        tunnel_id = str(tunnel['id'])
+                        tunnel_name = tunnel['name']
+                        comment = self.parent.get_tunnel_comment(tunnel_id)
+
+                        # 设置显示文本：如果有备注则显示名称和备注，否则只显示名称
+                        display_text = tunnel_name
+                        if comment:
+                            display_text += f" ({comment})"
+
+                        item = QListWidgetItem(display_text)
                         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+
+                        # 将隧道ID存储为用户数据
+                        item.setData(Qt.ItemDataRole.UserRole, tunnel_id)
+
                         # 设置选中状态
                         item.setCheckState(
-                            Qt.CheckState.Checked if tunnel['name'] in auto_start_tunnels
+                            Qt.CheckState.Checked if tunnel_id in auto_start_tunnels
                             else Qt.CheckState.Unchecked
                         )
                         self.tunnel_list.addItem(item)
@@ -1810,7 +1824,6 @@ class SettingsDialog(QDialog):
         self.node_offline_check.setChecked(notify_settings.get('node_offline', False))
         self.tunnel_start_check.setChecked(notify_settings.get('tunnel_start', False))
         self.node_online_check.setChecked(notify_settings.get('node_online', False))
-
 
     def toggle_autostart(self, state):
         if sys.platform == "win32":
@@ -1857,18 +1870,19 @@ class SettingsDialog(QDialog):
             log_size = int(self.log_size_input.text() or 10)
             backup_count = int(self.backup_count_input.text() or 30)
 
-            # 保存自动启动的隧道列表
+            # 保存自动启动隧道的ID而非名称
             auto_start_tunnels = []
             for i in range(self.tunnel_list.count()):
                 item = self.tunnel_list.item(i)
                 if item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
                     if item.checkState() == Qt.CheckState.Checked:
-                        auto_start_tunnels.append(item.text())
+                        # 存储隧道ID而不是名称
+                        tunnel_id = item.data(Qt.ItemDataRole.UserRole)
+                        auto_start_tunnels.append(tunnel_id)
 
             settings_pathway = get_absolute_path("settings.json")
             settings_content = {'auto_start_tunnels': auto_start_tunnels, 'theme': self.get_selected_theme(),
                                 'log_size_mb': log_size, 'backup_count': backup_count, 'mail': self.get_mail_config()}
-            # 保存邮件配置
 
             with open(settings_pathway, 'w') as file_contents:
                 json.dump(settings_content, file_contents)
@@ -1890,6 +1904,7 @@ class SettingsDialog(QDialog):
 
         except Exception as content:
             QMessageBox.warning(self, "错误", f"保存设置失败: {str(content)}")
+
 
 class UpdateCheckerDialog(QDialog):
     def __init__(self, parent=None):
@@ -3505,14 +3520,24 @@ class MainWindow(QMainWindow):
         try:
             with open(settings_path_json, 'r') as file_contents:
                 settings_content = json.load(file_contents)
+                # 获取要自动启动的隧道ID列表
                 auto_start_tunnels = settings_content.get('auto_start_tunnels', [])
 
             tunnels = API.get_user_tunnels(self.token)
             if tunnels:
                 for tunnel in tunnels:
-                    if tunnel['name'] in auto_start_tunnels:
+                    tunnel_id = str(tunnel['id'])
+                    # 根据ID匹配隧道，而不是名称
+                    if tunnel_id in auto_start_tunnels:
                         self.start_tunnel(tunnel)
-                        self.logger.info(f"自动启动隧道: {tunnel['name']}")
+                        # 获取隧道名称和备注用于日志显示
+                        tunnel_name = tunnel['name']
+                        comment = self.get_tunnel_comment(tunnel_id)
+                        # 准备日志消息，包含名称和备注
+                        log_message = f"自动启动隧道: {tunnel_name}"
+                        if comment:
+                            log_message += f" ({comment})"
+                        self.logger.info(log_message)
         except Exception as content:
             self.logger.error(f"自动启动隧道失败: {str(content)}")
 
