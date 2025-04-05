@@ -35,7 +35,7 @@ urllib3.disable_warnings()
 # ------------------------------以下为程序信息--------------------
 # 程序信息
 APP_NAME = "CUL" # 程序名称
-APP_VERSION = "1.6.3" # 程序版本
+APP_VERSION = "1.6.4" # 程序版本
 PY_VERSION = "3.13.*" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
@@ -376,6 +376,21 @@ class Pre_run_operations():
             except Exception as e:
                 print(f"处理settings.json文件时出错: {e}")
 
+        # 检查并创建tunnel_comments.json
+        comments_path = get_absolute_path("tunnel_comments.json")
+        if not os.path.exists(comments_path):
+            try:
+                with open(comments_path, 'w', encoding='utf-8') as f:
+                    json.dump({}, f, indent=4, ensure_ascii=False)
+                print("已创建隧道备注配置文件")
+            except Exception as e:
+                print(f"创建隧道备注配置文件时出错: {e}")
+        elif os.path.getsize(comments_path) == 0:
+            try:
+                with open(comments_path, 'w', encoding='utf-8') as f:
+                    json.dump({}, f, indent=4, ensure_ascii=False)
+            except Exception as e:
+                print(f"初始化空的隧道备注配置文件时出错: {e}")
 
         # 迁移旧的凭证文件到注册表
         credentials_path = get_absolute_path("credentials.json")
@@ -595,6 +610,7 @@ class TunnelCard(QFrame):
         self.start_stop_button = None
         self.link_label = None
         self.status_label = None
+        self.comment_label = None
         self.tunnel_info = tunnel_info
         self.token = user_token
         self.parent = parent
@@ -605,6 +621,7 @@ class TunnelCard(QFrame):
         self.updateStyle()
         self.fetch_node_info()
         self.update_backup_status()
+        self.load_comment()
 
     def initUI(self):
         layout = QVBoxLayout()
@@ -635,6 +652,11 @@ class TunnelCard(QFrame):
         # 添加备用节点状态标签
         self.backup_status_label = QLabel("备用节点: 正在加载...")
 
+        # 添加备注标签
+        self.comment_label = QLabel("备注: 无")
+        self.comment_label.setWordWrap(True)
+        self.comment_label.setStyleSheet("color: #666666; font-style: italic;")
+
         self.start_stop_button = QPushButton("启动")
         self.start_stop_button.clicked.connect(self.toggle_start_stop)
 
@@ -646,11 +668,22 @@ class TunnelCard(QFrame):
         layout.addWidget(self.status_label)
         layout.addWidget(self.link_label)
         layout.addWidget(self.backup_status_label)
+        layout.addWidget(self.comment_label)
         layout.addWidget(self.start_stop_button)
 
         self.setLayout(layout)
         self.setFixedSize(250, 280)
 
+    def load_comment(self):
+        """Load and display the comment for this tunnel"""
+        if hasattr(self.parent, 'get_tunnel_comment') and self.tunnel_info.get('id'):
+            comment = self.parent.get_tunnel_comment(self.tunnel_info['id'])
+            if comment:
+                self.comment_label.setText(f"备注: {comment}")
+            else:
+                self.comment_label.setText("备注: 无")
+        else:
+            self.comment_label.setText("备注: 无")
 
     def get_backup_config(self, tunnel_id):
         """获取隧道的备用节点配置"""
@@ -830,12 +863,15 @@ class TunnelCard(QFrame):
             self.setStyleSheet(self.styleSheet().replace(
                 "TunnelCard { border: 2px solid #0066cc; background-color: rgba(224, 224, 224, 50); }", ""))
 
+
 class BatchEditDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
         self.node_detail_text = None
         self.force_update_checkbox = None
+        self.comment_checkbox = None  # 添加备注编辑复选框
+        self.comment_input = None  # 添加备注输入框
         self.v1_api_radio = None
         self.v2_api_radio = None
         self.setWindowTitle("批量编辑隧道")
@@ -867,6 +903,22 @@ class BatchEditDialog(QDialog):
         force_update_note.setWordWrap(True)
         left_layout.addWidget(self.force_update_checkbox)
         left_layout.addWidget(force_update_note)
+
+        # 备注设置组
+        comment_group = QGroupBox("备注设置")
+        comment_layout = QVBoxLayout()
+
+        self.comment_checkbox = QCheckBox("修改备注")
+        self.comment_input = QLineEdit()
+        self.comment_input.setPlaceholderText("新的备注内容（会应用到所有选中的隧道）")
+        self.comment_input.setEnabled(False)  # 初始禁用
+
+        self.comment_checkbox.toggled.connect(self.on_comment_toggled)
+
+        comment_layout.addWidget(self.comment_checkbox)
+        comment_layout.addWidget(self.comment_input)
+        comment_group.setLayout(comment_layout)
+        left_layout.addWidget(comment_group)
 
         form_layout = QFormLayout()
 
@@ -931,6 +983,10 @@ class BatchEditDialog(QDialog):
         # 初始化节点详情
         self.on_node_changed(self.node_combo.currentIndex())
 
+    def on_comment_toggled(self, checked):
+        """启用或禁用备注输入框"""
+        self.comment_input.setEnabled(checked)
+
     def on_node_changed(self, index):
         """当节点选择变化时更新节点详情"""
         if index == 0:
@@ -956,8 +1012,6 @@ class BatchEditDialog(QDialog):
                 self.node_detail_text.setPlainText(detail_text)
                 break
 
-    # 移除on_type_changed方法，因为不再需要动态更新域名输入框
-
     def get_changes(self):
         changes = {}
 
@@ -981,6 +1035,10 @@ class BatchEditDialog(QDialog):
         # API版本和强制修改标志
         changes['use_v1_api'] = self.v1_api_radio.isChecked()
         changes['force_update'] = self.force_update_checkbox.isChecked()
+
+        # 处理备注修改
+        if self.comment_checkbox.isChecked() and self.comment_input.text():
+            changes['comment'] = self.comment_input.text()
 
         return changes
 
@@ -3231,6 +3289,42 @@ class MainWindow(QMainWindow):
 
         return None
 
+    def load_tunnel_comments(self):
+        comments_path = get_absolute_path("tunnel_comments.json")
+        if os.path.exists(comments_path):
+            try:
+                with open(comments_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                self.logger.error(f"加载隧道备注失败: {str(e)}")
+        return {}
+
+    def save_tunnel_comments(self, comments):
+        comments_path = get_absolute_path("tunnel_comments.json")
+        try:
+            with open(comments_path, 'w', encoding='utf-8') as f:
+                json.dump(comments, f, indent=4, ensure_ascii=False)
+            return True
+        except Exception as e:
+            self.logger.error(f"保存隧道备注失败: {str(e)}")
+            return False
+
+    def get_tunnel_comment(self, tunnel_id):
+        comments = self.load_tunnel_comments()
+        return comments.get(str(tunnel_id), "")
+
+    def set_tunnel_comment(self, tunnel_id, comment):
+        comments = self.load_tunnel_comments()
+        comments[str(tunnel_id)] = comment
+        return self.save_tunnel_comments(comments)
+
+    def delete_tunnel_comment(self, tunnel_id):
+        comments = self.load_tunnel_comments()
+        if str(tunnel_id) in comments:
+            del comments[str(tunnel_id)]
+            return self.save_tunnel_comments(comments)
+        return True
+
     def get_backup_config_status(self, tunnel_id):
         """获取备用配置状态描述"""
         config = self.get_backup_config(tunnel_id)
@@ -3711,6 +3805,7 @@ class MainWindow(QMainWindow):
 				""")
 
     def batch_edit_tunnels(self):
+        """批量编辑隧道"""
         if not self.selected_tunnels:
             QMessageBox.warning(self, "警告", "请先选择要编辑的隧道")
             return
@@ -3722,61 +3817,81 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "提示", "没有进行任何修改")
                 return
 
+            # 从API更改中分离出备注更改
+            comment_change = None
+            if 'comment' in changes:
+                comment_change = changes.pop('comment')  # 从API更改中移除备注
+
+            # 存储API操作是否成功的隧道
+            successful_tunnels = []
+
             for tunnel_info in self.selected_tunnels:
                 try:
                     tunnel_type = changes.get("type", tunnel_info["type"])
+                    tunnel_id = tunnel_info["id"]
 
-                    # 构建基本请求负载
-                    payload = {
-                        "tunnelid": int(tunnel_info["id"]),
-                        "token": self.token,
-                        "tunnelname": tunnel_info["name"],
-                        "node": changes.get("node", tunnel_info["node"]),
-                        "localip": changes.get("localip", tunnel_info["localip"]),
-                        "porttype": tunnel_type,
-                        "localport": tunnel_info["nport"],
-                        "encryption": changes.get("encryption", tunnel_info["encryption"]),
-                        "compression": changes.get("compression", tunnel_info["compression"])
-                    }
+                    # 处理API更改
+                    if changes and changes != {'use_v1_api': False, 'force_update': False}:  # 如果有实际的API更改
+                        # 构建基本请求负载
+                        payload = {
+                            "tunnelid": int(tunnel_id),
+                            "token": self.token,
+                            "tunnelname": tunnel_info["name"],
+                            "node": changes.get("node", tunnel_info["node"]),
+                            "localip": changes.get("localip", tunnel_info["localip"]),
+                            "porttype": tunnel_type,
+                            "localport": tunnel_info["nport"],
+                            "encryption": changes.get("encryption", tunnel_info["encryption"]),
+                            "compression": changes.get("compression", tunnel_info["compression"])
+                        }
 
-                    # 验证本地端口是否有效
-                    if "nport" in changes:
-                        if not enter_inspector.validate_port(changes["nport"], True):
-                            raise ValueError(f"隧道 '{tunnel_info['name']}': 本地端口必须是1-65535之间的整数")
-                        payload["localport"] = int(changes["nport"])
+                        # 验证本地端口是否有效
+                        if "nport" in changes:
+                            if not enter_inspector.validate_port(changes["nport"], True):
+                                raise ValueError(f"隧道 '{tunnel_info['name']}': 本地端口必须是1-65535之间的整数")
+                            payload["localport"] = int(changes["nport"])
 
-                    # 根据隧道类型设置正确的远程端口/绑定域名参数
-                    if tunnel_type.lower() in ["tcp", "udp"]:
-                        # TCP/UDP类型使用remoteport参数
-                        try:
-                            payload["remoteport"] = int(tunnel_info["dorp"])
-                        except (ValueError, TypeError):
-                            raise ValueError(f"隧道 '{tunnel_info['name']}': 远程端口必须是整数")
-                    else:
-                        # HTTP/HTTPS类型使用banddomain参数
-                        payload["banddomain"] = tunnel_info["dorp"]
-
-                    # 添加调试日志
-                    self.logger.info(
-                        f"正在更新隧道 '{tunnel_info['name']}' (ID: {tunnel_info['id']}，类型: {tunnel_type})")
-
-                    # 发送请求
-                    headers = get_headers(request_json=True)
-                    url = "http://cf-v2.uapis.cn/update_tunnel"
-                    response = requests.post(url, headers=headers, json=payload)
-
-                    if response.status_code == 200:
-                        result = response.json()
-                        if result.get('code') == 200:
-                            self.logger.info(f"隧道 {tunnel_info['name']} 更新成功")
+                        # 根据隧道类型设置正确的远程端口/绑定域名参数
+                        if tunnel_type.lower() in ["tcp", "udp"]:
+                            # TCP/UDP类型使用remoteport参数
+                            try:
+                                payload["remoteport"] = int(tunnel_info["dorp"])
+                            except (ValueError, TypeError):
+                                raise ValueError(f"隧道 '{tunnel_info['name']}': 远程端口必须是整数")
                         else:
-                            self.logger.error(f"更新隧道 {tunnel_info['name']} 失败: {result.get('msg', '未知错误')}")
+                            # HTTP/HTTPS类型使用banddomain参数
+                            payload["banddomain"] = tunnel_info["dorp"]
+
+                        # 添加调试日志
+                        self.logger.info(
+                            f"正在更新隧道 '{tunnel_info['name']}' (ID: {tunnel_id}，类型: {tunnel_type})")
+
+                        # 发送请求
+                        headers = get_headers(request_json=True)
+                        url = "http://cf-v2.uapis.cn/update_tunnel"
+                        response = requests.post(url, headers=headers, json=payload)
+
+                        if response.status_code == 200:
+                            result = response.json()
+                            if result.get('code') == 200:
+                                self.logger.info(f"隧道 {tunnel_info['name']} 更新成功")
+                                successful_tunnels.append(tunnel_id)
+                            else:
+                                self.logger.error(
+                                    f"更新隧道 {tunnel_info['name']} 失败: {result.get('msg', '未知错误')}")
+                                QMessageBox.warning(self, "错误",
+                                                    f"更新隧道 {tunnel_info['name']} 失败: {result.get('msg', '未知错误')}")
+                        else:
+                            self.logger.error(f"更新隧道 {tunnel_info['name']} 失败: HTTP {response.status_code}")
                             QMessageBox.warning(self, "错误",
-                                                f"更新隧道 {tunnel_info['name']} 失败: {result.get('msg', '未知错误')}")
+                                                f"更新隧道 {tunnel_info['name']} 失败: HTTP {response.status_code}")
                     else:
-                        self.logger.error(f"更新隧道 {tunnel_info['name']} 失败: HTTP {response.status_code}")
-                        QMessageBox.warning(self, "错误",
-                                            f"更新隧道 {tunnel_info['name']} 失败: HTTP {response.status_code}")
+                        # 没有API更改，但可能有备注更改
+                        successful_tunnels.append(tunnel_id)
+
+                    # 无论API操作是否成功，都处理备注变更
+                    if comment_change is not None:
+                        self.set_tunnel_comment(tunnel_id, comment_change)
 
                 except Exception as e:
                     self.logger.exception(f"更新隧道 {tunnel_info['name']} 时发生错误")
@@ -3927,7 +4042,115 @@ class MainWindow(QMainWindow):
         self.edit_domain_button.setEnabled(True)
         self.delete_domain_button.setEnabled(True)
 
+    def edit_tunnel_comment(self):
+        """编辑选中隧道的备注"""
+        if not self.selected_tunnels or len(self.selected_tunnels) != 1:
+            return
+
+        tunnel = self.selected_tunnels[0]
+        current_comment = self.get_tunnel_comment(tunnel['id'])
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"编辑隧道备注: {tunnel['name']}")
+        layout = QVBoxLayout(dialog)
+
+        # 添加说明标签
+        info_label = QLabel(f"正在编辑 '{tunnel['name']}' 的备注")
+        info_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(info_label)
+
+        # 添加备注输入框
+        comment_input = QLineEdit(current_comment)
+        comment_input.setPlaceholderText("输入隧道备注")
+
+        layout.addWidget(QLabel("备注:"))
+        layout.addWidget(comment_input)
+
+        # 添加说明文本
+        help_text = QLabel("备注仅保存在本地，不会上传到服务器。\n可用于记录隧道用途、特殊配置等。")
+        help_text.setStyleSheet("color: gray; font-size: 10px;")
+        help_text.setWordWrap(True)
+        layout.addWidget(help_text)
+
+        # 添加按钮
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        # 设置对话框样式
+        if hasattr(self, 'dark_theme') and self.dark_theme:
+            dialog.setStyleSheet("""
+                QDialog { background-color: #2D2D2D; color: #FFFFFF; }
+                QLabel { color: #FFFFFF; }
+                QLineEdit { background-color: #3D3D3D; color: #FFFFFF; border: 1px solid #555555; padding: 5px; }
+                QPushButton { background-color: #0D6EFD; color: white; border-radius: 4px; padding: 6px 12px; }
+                QPushButton:hover { background-color: #0B5ED7; }
+            """)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_comment = comment_input.text().strip()
+            if new_comment != current_comment:
+                self.set_tunnel_comment(tunnel['id'], new_comment)
+                self.logger.info(f"已更新隧道 '{tunnel['name']}' 的备注")
+                self.load_tunnels()  # 刷新以显示更新后的备注
+
+    # 添加这些辅助方法用于启动和停止选中的隧道
+    def start_selected_tunnels(self):
+        """启动所有选中的隧道"""
+        for tunnel in self.selected_tunnels:
+            self.start_tunnel(tunnel)
+
+        self.logger.info(f"已启动 {len(self.selected_tunnels)} 个选中的隧道")
+
+    def stop_selected_tunnels(self):
+        """停止所有选中的隧道"""
+        for tunnel in self.selected_tunnels:
+            self.stop_tunnel(tunnel)
+
+        self.logger.info(f"已停止 {len(self.selected_tunnels)} 个选中的隧道")
+
+    def show_tunnel_context_menu(self, position):
+        """显示隧道右键菜单"""
+        # 检查是否有选中的隧道
+        if not self.selected_tunnels:
+            return
+
+        menu = QMenu()
+
+        # 只有选中一个隧道时才添加编辑备注选项
+        if len(self.selected_tunnels) == 1:
+            edit_comment_action = menu.addAction("编辑备注")
+            edit_comment_action.triggered.connect(self.edit_tunnel_comment)
+
+        # 添加其他右键菜单选项
+        start_action = menu.addAction("启动选中隧道")
+        start_action.triggered.connect(self.start_selected_tunnels)
+
+        stop_action = menu.addAction("停止选中隧道")
+        stop_action.triggered.connect(self.stop_selected_tunnels)
+
+        # 添加备用节点配置选项（如果只选中一个隧道）
+        if len(self.selected_tunnels) == 1:
+            backup_config_action = menu.addAction("配置备用节点")
+            backup_config_action.triggered.connect(self.configure_backup_nodes)
+
+        # 添加分隔线
+        menu.addSeparator()
+
+        # 添加编辑和删除选项
+        if len(self.selected_tunnels) == 1:
+            edit_action = menu.addAction("编辑隧道")
+            edit_action.triggered.connect(self.edit_tunnel)
+
+        delete_action = menu.addAction("删除隧道")
+        delete_action.triggered.connect(self.delete_tunnel)
+
+        # 显示菜单
+        menu.exec(self.tunnel_container.mapToGlobal(position))
+
     def setup_tunnel_page(self):
+        """设置隧道页面"""
         tunnel_widget = QWidget()
         layout = QVBoxLayout(tunnel_widget)
 
@@ -3951,6 +4174,10 @@ class MainWindow(QMainWindow):
 
         self.tunnel_container = QWidget()
         self.tunnel_container.setLayout(QGridLayout())
+
+        # 添加右键菜单支持
+        self.tunnel_container.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tunnel_container.customContextMenuRequested.connect(self.show_tunnel_context_menu)
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
@@ -3998,6 +4225,12 @@ class MainWindow(QMainWindow):
         # 初始化表单控件并预填数据
         name_input = QLineEdit(tunnel_info['name'] if tunnel_info else '')
         name_input.setPlaceholderText("若留空则随机")
+
+        # 添加备注输入框
+        comment_input = QLineEdit()
+        if tunnel_info and tunnel_info.get('id'):
+            comment_input.setText(self.get_tunnel_comment(tunnel_info['id']))
+        comment_input.setPlaceholderText("可选，添加隧道备注")
 
         local_ip_input = QLineEdit(tunnel_info['localip'] if tunnel_info else '127.0.0.1')
         local_port_input = QLineEdit(str(tunnel_info['nport']) if tunnel_info else '')
@@ -4053,6 +4286,7 @@ class MainWindow(QMainWindow):
 
         # 添加到表单布局
         form_layout.addRow("隧道名称:", name_input)
+        form_layout.addRow("备注:", comment_input)  # 添加备注字段
         form_layout.addRow("本地IP/主机名:", local_ip_input)
         form_layout.addRow("本地端口:", local_port_input)
         form_layout.addRow(remote_port_label, remote_port_input)
@@ -4079,15 +4313,15 @@ class MainWindow(QMainWindow):
             for node in nodes:
                 if node['name'] == node_name:
                     detail_text.setPlainText(f"""
-    节点名称: {node['name']}
-    节点地址: {node['area']}
-    权限组: {node['nodegroup']}
-    是否属于大陆带宽节点: {'是' if node['china'] == 'true' else '否'}
-    是否支持web: {'支持' if node['web'] == 'true' else '不支持'}
-    是否支持udp: {'支持' if node['udp'] == 'true' else '不支持'} 
-    是否有防御: {'有' if node['fangyu'] == 'true' else '无'}
-    节点介绍: {node['notes']}
-    """)
+        节点名称: {node['name']}
+        节点地址: {node['area']}
+        权限组: {node['nodegroup']}
+        是否属于大陆带宽节点: {'是' if node['china'] == 'true' else '否'}
+        是否支持web: {'支持' if node['web'] == 'true' else '不支持'}
+        是否支持udp: {'支持' if node['udp'] == 'true' else '不支持'} 
+        是否有防御: {'有' if node['fangyu'] == 'true' else '无'}
+        节点介绍: {node['notes']}
+        """)
                     break
 
         def on_type_changed():
@@ -4141,7 +4375,7 @@ class MainWindow(QMainWindow):
 
                 # 根据类型设置端口或域名
                 if port_type in ["tcp", "udp"]:
-                    if not enter_inspector.validate_port(remote_port,False):
+                    if not enter_inspector.validate_port(remote_port, False):
                         raise ValueError("远程端口必须是10000-65535之间的整数")
                     payload["remoteport"] = int(remote_port)
                 elif port_type in ["http", "https"]:
@@ -4202,11 +4436,29 @@ class MainWindow(QMainWindow):
                             if not delete_success:
                                 raise Exception("无法删除原隧道")
 
+                            # 创建新隧道前，保存之前的备注
+                            old_comment = self.get_tunnel_comment(tunnel_info["id"])
+                            self.delete_tunnel_comment(tunnel_info["id"])
+
                             # 创建新隧道
                             time.sleep(1)  # 等待删除操作完成
                             create_url = "http://cf-v2.uapis.cn/create_tunnel"
                             response = requests.post(create_url, headers=headers, json=payload)
-                            return response.json()
+                            response_data = response.json()
+
+                            # 如果成功创建，找到新隧道ID并保存备注
+                            if response_data['code'] == 200 and (comment_input.text().strip() or old_comment):
+                                # 尝试找回新的隧道ID
+                                time.sleep(1)  # 等待API刷新
+                                tunnels = API.get_user_tunnels(self.token)
+                                for tunnel in tunnels:
+                                    if tunnel['name'] == payload['tunnelname']:
+                                        # 保存之前的备注或新备注
+                                        self.set_tunnel_comment(tunnel['id'],
+                                                                comment_input.text().strip() or old_comment)
+                                        break
+
+                            return response_data
                         else:
                             return None
                     else:
@@ -4234,9 +4486,15 @@ class MainWindow(QMainWindow):
                             response = requests.get(v1_url, params=v1_params, headers=headers)
                             response_content = response.text
                             try:
-                                return {"code": 200,
-                                        "msg": response_content} if "success" in response_content.lower() else {
+                                result = {"code": 200,
+                                          "msg": response_content} if "success" in response_content.lower() else {
                                     "code": 400, "msg": response_content}
+
+                                # 保存备注信息
+                                if result["code"] == 200 and comment_input.text().strip():
+                                    self.set_tunnel_comment(tunnel_info["id"], comment_input.text().strip())
+
+                                return result
                             except Exception as content:
                                 self.logger.error(f"解析V1 API响应时出错: {str(content)}")
                                 return {"code": 500, "msg": str(content)}
@@ -4244,13 +4502,30 @@ class MainWindow(QMainWindow):
                             # 使用V2 API
                             url = "http://cf-v2.uapis.cn/update_tunnel"
                             response = requests.post(url, headers=headers, json=payload)
+                            response_data = response.json()
 
-                        return response.json()
+                            # 保存备注信息
+                            if response_data['code'] == 200 and comment_input.text().strip():
+                                self.set_tunnel_comment(tunnel_info["id"], comment_input.text().strip())
+
+                            return response_data
                 else:
                     # 创建新隧道只使用V2 API
                     url = "http://cf-v2.uapis.cn/create_tunnel"
                     response = requests.post(url, headers=headers, json=payload)
-                    return response.json()
+                    response_data = response.json()
+
+                    # 如果创建成功，保存备注
+                    if response_data['code'] == 200 and comment_input.text().strip():
+                        # 查找新创建的隧道ID
+                        time.sleep(1)  # 稍微等待API刷新
+                        tunnels = API.get_user_tunnels(self.token)
+                        for tunnel in tunnels:
+                            if tunnel['name'] == payload['tunnelname']:
+                                self.set_tunnel_comment(tunnel['id'], comment_input.text().strip())
+                                break
+
+                    return response_data
 
             except ValueError as ve:
                 raise ve
@@ -5823,14 +6098,19 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
             if reply == QMessageBox.StandardButton.Yes:
                 try:
+                    # 保存隧道ID用于稍后删除本地备注
+                    tunnel_id = tunnel_info["id"]
 
                     url_v2 = f"http://cf-v2.uapis.cn/deletetunnel"
-                    params = {"token": self.token, "tunnelid": tunnel_info["id"]}
+                    params = {"token": self.token, "tunnelid": tunnel_id}
                     headers = get_headers()
                     response = requests.post(url_v2, headers=headers, params=params)
                     if response.status_code == 200:
                         self.logger.info(f"隧道 '{tunnel_info['name']}' 删除成功 (v2 API)")
                         self.selected_tunnels.remove(tunnel_info)
+
+                        # 删除隧道的本地备注
+                        self.delete_tunnel_comment(tunnel_id)
                     else:
                         self.logger.error(f"v2 API 删除隧道失败")
                         raise Exception(f"v2 API 删除失败")
@@ -5838,17 +6118,23 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                 except Exception:
                     self.logger.error(f"v2 API 删除失败，尝试 v1 API...")
                     try:
+                        # 保存隧道ID用于稍后删除本地备注
+                        tunnel_id = tunnel_info["id"]
+
                         url_v1 = f"http://cf-v1.uapis.cn/api/deletetl.php"
                         params = {
                             "token": user_token,
                             "userid": user_id,
-                            "nodeid": tunnel_info["id"],
+                            "nodeid": tunnel_id,
                         }
                         headers = get_headers()
                         response_v1 = requests.get(url_v1, params=params, headers=headers)
                         if response_v1.status_code == 200:
                             self.logger.info(f"隧道 '{tunnel_info['name']}' 删除成功 (v1 API)")
                             self.selected_tunnels.remove(tunnel_info)  # 从选中列表中移除
+
+                            # 删除隧道的本地备注
+                            self.delete_tunnel_comment(tunnel_id)
                         else:
                             self.logger.error(f"v1 API 删除隧道失败: {response_v1.text}")
                             raise Exception(f"v1 API 删除失败: {response_v1.text}")
