@@ -2877,6 +2877,37 @@ class BackupNodeConfigDialog(QDialog):
             self.logger.error(f"检查域名目标时发生错误: {str(e)}")
             return False
 
+    def check_domain_target_status(self, domain_info):
+        """检查域名指向状态并显示结果"""
+        if not domain_info or not self.parent:
+            return
+
+        # 获取当前隧道信息和节点
+        tunnel_info = self.tunnel_info
+        if not tunnel_info:
+            return
+
+        node_name = tunnel_info.get('node')
+        if not node_name:
+            return
+
+        # 调用父窗口的check_domain_target方法来检查域名指向
+        is_correct = self.parent.check_domain_target(domain_info, node_name, tunnel_info)
+
+        # 显示检查结果
+        if is_correct:
+            QMessageBox.information(
+                self,
+                "域名检查",
+                f"域名 {domain_info.get('record', '')}.{domain_info.get('domain', '')} 已正确指向节点 {node_name}"
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "域名检查",
+                f"域名 {domain_info.get('record', '')}.{domain_info.get('domain', '')} 未正确指向节点 {node_name}"
+            )
+
     def load_existing_config(self):
         """在BackupNodeConfigDialog中加载现有备用节点配置，并显示域名更新状态"""
         config_path = get_absolute_path("backup_config.json")
@@ -3520,24 +3551,14 @@ class MainWindow(QMainWindow):
         try:
             with open(settings_path_json, 'r') as file_contents:
                 settings_content = json.load(file_contents)
-                # 获取要自动启动的隧道ID列表
                 auto_start_tunnels = settings_content.get('auto_start_tunnels', [])
 
             tunnels = API.get_user_tunnels(self.token)
             if tunnels:
                 for tunnel in tunnels:
-                    tunnel_id = str(tunnel['id'])
-                    # 根据ID匹配隧道，而不是名称
-                    if tunnel_id in auto_start_tunnels:
+                    if str(tunnel['id']) in [str(id) for id in auto_start_tunnels]:
                         self.start_tunnel(tunnel)
-                        # 获取隧道名称和备注用于日志显示
-                        tunnel_name = tunnel['name']
-                        comment = self.get_tunnel_comment(tunnel_id)
-                        # 准备日志消息，包含名称和备注
-                        log_message = f"自动启动隧道: {tunnel_name}"
-                        if comment:
-                            log_message += f" ({comment})"
-                        self.logger.info(log_message)
+                        self.logger.info(f"自动启动隧道: {tunnel['name']}")
         except Exception as content:
             self.logger.error(f"自动启动隧道失败: {str(content)}")
 
@@ -3770,7 +3791,6 @@ class MainWindow(QMainWindow):
             if self.check_domain_target(domain_config, node_name, tunnel_info):
                 return
 
-            self.logger.info(f"隧道 {tunnel_info.get('name', 'unknown')} 的域名指向不正确，正在更新...")
             self.update_domain_for_backup(domain_config, tunnel_info, node_name)
 
         except Exception as e:
@@ -5337,7 +5357,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
     def start_tunnel(self, tunnel_info):
         try:
-            # 检查节点状态
+            # 检查节点状态是否在线
             if not API.is_node_online(tunnel_info['node'], tyen="online"):
                 # 检查是否有备用节点配置
                 backup_config = self.get_backup_config(tunnel_info['id'])
@@ -5351,14 +5371,13 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                             modified_tunnel = tunnel_info.copy()
                             modified_tunnel['node'] = backup_node
 
-                            # 如果配置了域名，更新域名
+                            # 如果配置了域名，更新域名指向备用节点
                             domain_config = backup_config.get('domain')
                             if domain_config:
                                 self.update_domain_for_backup(domain_config, modified_tunnel, backup_node)
 
                             # 使用备用节点启动隧道
                             self._start_tunnel_process(modified_tunnel)
-
                             return
 
                     # 如果代码执行到这里，说明没有在线的备用节点
@@ -5369,7 +5388,18 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     QMessageBox.warning(self, "警告", f"节点 {tunnel_info['node']} 当前不在线")
                     return
 
-            # 如果节点在线，正常启动隧道
+            # 节点在线，在启动隧道前检查域名配置
+            backup_config = self.get_backup_config(tunnel_info['id'])
+            if backup_config and backup_config.get('domain'):
+                domain_config = backup_config.get('domain')
+                # 检查域名是否指向正确的节点
+                if not self.check_domain_target(domain_config, tunnel_info['node'], tunnel_info):
+                    self.logger.info(
+                        f"域名 {domain_config.get('record')}.{domain_config.get('domain')} 不指向当前节点，正在更新...")
+                    # 更新域名以指向当前节点
+                    self.update_domain_for_backup(domain_config, tunnel_info, tunnel_info['node'])
+
+            # 使用当前节点启动隧道
             self._start_tunnel_process(tunnel_info)
 
         except Exception as e:
@@ -5420,11 +5450,10 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         QTimer.singleShot(100, lambda: self.check_tunnel_status_frequent(tunnel_name))
 
     def check_tunnel_status_frequent(self, tunnel_name):
-        """高频检查隧道状态"""
+        """检查隧道状态"""
         try:
             if tunnel_name not in self.tunnel_processes:
                 QTimer.singleShot(0, lambda: self.update_tunnel_card_status(tunnel_name, False))
-                self.logger.info(f"隧道 {tunnel_name} 不在监控列表中")
                 return
 
             process = self.tunnel_processes[tunnel_name]
@@ -5536,22 +5565,17 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     success = True
                     domain_config = backup_config.get('domain')
                     if domain_config and isinstance(domain_config, dict):
-                        # Validate domain_config has required fields
                         if domain_config.get('domain') and domain_config.get('record'):
-                            # Try to update domain record
                             domain_result = self.update_domain_for_backup(domain_config, modified_tunnel, backup_node)
                             if not domain_result:
                                 self.logger.warning(f"切换到备用节点 {backup_node} 时更新域名失败，但仍将继续启动隧道")
                         else:
                             self.logger.warning(f"域名配置不完整，无法更新域名记录")
 
-                    # If everything is OK, start the tunnel
                     if success:
-                        # Use QTimer to ensure this runs in main thread
                         QTimer.singleShot(0, lambda: self._start_tunnel_process(modified_tunnel))
                         return True
 
-            # If code reaches here, no online backup nodes found
             self.logger.warning(f"隧道 {tunnel_name} 的所有备用节点都不在线")
             return False
 
