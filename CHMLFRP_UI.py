@@ -3156,7 +3156,7 @@ class MainWindow(QMainWindow):
         icon_pixmap = QPixmap(get_absolute_path("favicon-d.ico"))
         if not icon_pixmap.isNull():
             # 将图标缩放到24x24像素，保持纵横比
-            icon_pixmap = icon_pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio,
+            icon_pixmap = icon_pixmap.scaled(25, 25, Qt.AspectRatioMode.KeepAspectRatio,
                                              Qt.TransformationMode.SmoothTransformation)
             icon_label.setPixmap(icon_pixmap)
         else:
