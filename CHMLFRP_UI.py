@@ -38,6 +38,7 @@ APP_VERSION = "1.6.4" # 程序版本
 PY_VERSION = "3.13.*" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
+n_of_tunnels = 0 # 节点判断
 USER_AGENT = f"{APP_NAME}/{APP_VERSION} (Python/{PY_VERSION}; {WINDOWS_VERSION})" # 生成统一的 User-Agent
 
 # ------------------------------更新的镜像地址--------------------
@@ -331,7 +332,9 @@ class Pre_run_operations():
                     "tunnel_offline": False,  # 设置为False
                     "node_offline": False,  # 设置为False
                     "tunnel_start": False,  # 设置为False
-                    "node_online": False  # 设置为False
+                    "node_online": False,  # 设置为False
+                    "node_added": False,  # 设置为False
+                    "node_removed": False  # 设置为False
                 }
             }
         }
@@ -1466,14 +1469,19 @@ class SettingsDialog(QDialog):
         notify_layout = QVBoxLayout()
 
         self.tunnel_offline_check = QCheckBox("隧道离线通知")
-        self.node_offline_check = QCheckBox("节点离线通知")
         self.tunnel_start_check = QCheckBox("隧道启动通知")
-        self.node_online_check = QCheckBox("新节点上线通知")
+
+        self.node_offline_check = QCheckBox("节点离线通知")
+        self.node_online_check = QCheckBox("节点上线通知")
+        self.node_added_check = QCheckBox("节点上架通知")
+        self.node_removed_check = QCheckBox("节点下架通知")
 
         notify_layout.addWidget(self.tunnel_offline_check)
-        notify_layout.addWidget(self.node_offline_check)
         notify_layout.addWidget(self.tunnel_start_check)
+        notify_layout.addWidget(self.node_offline_check)
         notify_layout.addWidget(self.node_online_check)
+        notify_layout.addWidget(self.node_added_check)
+        notify_layout.addWidget(self.node_removed_check)
         notify_group.setLayout(notify_layout)
 
         notification_layout.addWidget(mail_group)
@@ -1527,9 +1535,11 @@ class SettingsDialog(QDialog):
             "smtp_port": self.smtp_port_input.text(),
             "notifications": {
                 "tunnel_offline": self.tunnel_offline_check.isChecked(),
-                "node_offline": self.node_offline_check.isChecked(),
                 "tunnel_start": self.tunnel_start_check.isChecked(),
-                "node_online": self.node_online_check.isChecked()
+                "node_offline": self.node_offline_check.isChecked(),
+                "node_online": self.node_online_check.isChecked(),
+                "node_added": self.node_added_check.isChecked(),
+                "node_removed": self.node_removed_check.isChecked()
             }
         }
 
@@ -1760,6 +1770,9 @@ class SettingsDialog(QDialog):
         self.node_offline_check.setChecked(notify_settings.get('node_offline', False))
         self.tunnel_start_check.setChecked(notify_settings.get('tunnel_start', False))
         self.node_online_check.setChecked(notify_settings.get('node_online', False))
+        self.node_added_check.setChecked(notify_settings.get('node_added', False))
+        self.node_removed_check.setChecked(notify_settings.get('node_removed', False))
+
 
     def toggle_autostart(self, state):
         if sys.platform == "win32":
@@ -3020,6 +3033,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.last_node_list = []
+        self.current_nodes = []
+        self.previous_nodes = []
         self.stop_worker = None
         self.stop_thread = None
         self.button_hover_color = None
@@ -3101,9 +3116,13 @@ class MainWindow(QMainWindow):
         self.set_taskbar_icon()
         self.setup_system_tray()
 
+        self.node_check_timer = QTimer(self)
+        self.node_check_timer.timeout.connect(self.check_node_status_changes)
+        self.node_check_timer.start(100)
+
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.auto_update)
-        self.update_timer.start(30000)  # 30秒更新一次
+        self.update_timer.start(40000)  # 40秒更新一次
 
         self.user_info = None
         self.node_list = QWidget()
@@ -3111,10 +3130,12 @@ class MainWindow(QMainWindow):
         self.running_tunnels = {}
         self.running_tunnels_mutex = QMutex()
 
-        self.node_check_timer = QTimer(self)
-        self.node_check_timer.timeout.connect(self.check_node_status)
-        self.node_check_timer.timeout.connect(self.check_new_nodes)
-        self.node_check_timer.start(10000)
+        # 设置两个不同的计时器
+
+
+        self.tunnel_check_timer = QTimer(self)
+        self.tunnel_check_timer.timeout.connect(self.check_node_status)
+        self.tunnel_check_timer.start(600000)  # 每10分钟处理隧道切换
 
         # 初始化UI
         self.initUI()
@@ -3442,34 +3463,69 @@ class MainWindow(QMainWindow):
                         smtp_server=mail_config.get('smtp_server'),
                         port=mail_config.get('smtp_port')
                     )
-                self.notify_settings = mail_config.get('notifications', {})
 
-    def send_notification(self, event_type, message ,name):
-        """发送通知"""
+                # 设置通知配置，确保包含所有可能的通知类型
+                default_notify_settings = {
+                    'tunnel_offline': False,
+                    'tunnel_start': False,
+                    'node_offline': False,
+                    'node_online': False,
+                    'node_added': False,
+                    'node_removed': False
+                }
+
+                # 使用配置文件中的设置或默认值
+                self.notify_settings = {**default_notify_settings, **(mail_config.get('notifications', {}))}
+
+    def send_notification(self, event_type, message, node_name):
+        """发送通知
+
+        Args:
+            event_type: 事件类型，如 "node_online", "node_offline", "node_added", "node_removed" 等
+            message: 通知内容
+            node_name: 相关节点名称
+        """
         if not self.mail_notifier or not self.notify_settings.get(event_type, False):
             return
+
         computer_name = message_push.get_computer_name()
         current_time = message_push.get_current_time()
-        if event_type == "tunnel_offline":
-            event_type = f"{name}隧道离线了"
+
+        # 根据事件类型设置适当的主题
+        if event_type == "node_online":
+            subject_prefix = f"节点上线通知"
         elif event_type == "node_offline":
-            event_type = f"{name}节点离线了"
+            subject_prefix = f"节点离线通知"
+        elif event_type == "node_added":
+            subject_prefix = f"节点上架通知"
+        elif event_type == "node_removed":
+            subject_prefix = f"节点下架通知"
+        elif event_type == "tunnel_offline":
+            subject_prefix = f"{node_name}隧道离线通知"
         elif event_type == "tunnel_start":
-            event_type = f"{name}隧道上线了"
-        elif event_type == "node_online":
-            event_type = f"{name}节点上线了"
-        subject = f"{APP_NAME}系统通知 - {event_type}"
+            subject_prefix = f"{node_name}隧道启动通知"
+        else:
+            subject_prefix = f"系统通知 - {event_type}"
+
+        subject = f"{APP_NAME} {subject_prefix}"
+
         body = f"""
-        事件类型：{event_type}
+        通知类型：{subject_prefix}
         发生时间：{current_time}
         计算机名称：{computer_name}
+
         详细信息：
         {message}
+
+        此邮件由 {APP_NAME} v{APP_VERSION} 自动发送
         """
+
         # 在子线程中发送邮件避免阻塞UI
-        threading.Thread(target=self.mail_notifier.send,
-                         args=(subject, body),
-                         daemon=True).start()
+        threading.Thread(
+            target=self.mail_notifier.send,
+            args=(subject, body),
+            daemon=True
+        ).start()
 
     def load_app_settings(self):
         """加载应用程序设置"""
@@ -3662,28 +3718,28 @@ class MainWindow(QMainWindow):
             self.logger.error(f"检查域名配置时发生错误: {str(e)}")
 
     def check_node_status(self):
-        """检查节点状态并处理隧道切换"""
-        if not self.token:
+        """检查节点状态并处理隧道切换 - 保持原有逻辑不变"""
+        if not self.token or not self.current_nodes:
             return
+
+        # 获取当前在线节点名称
+        online_nodes = set(node['node_name'] for node in self.current_nodes if node['state'] == 'online')
+
         tunnels = API.get_user_tunnels(self.token)
         if tunnels is None:
             return
-        online_nodes = set(self.last_node_list)
+
         for tunnel_name, process in list(self.tunnel_processes.items()):
             tunnel_info = next((t for t in tunnels if t['name'] == tunnel_name), None)
             if tunnel_info:
                 node_name = tunnel_info['node']
-                # 检查节点是否在 self.last_node_list 中
+                # 检查节点是否在当前在线节点列表中
                 if node_name not in online_nodes:
                     self.logger.warning(f"节点 {node_name} 离线，尝试切换到备用节点")
                     # 尝试切换到备用节点
                     switched = self.switch_to_backup_node(tunnel_info, process)
                     # 停止当前隧道
                     self.stop_tunnel({"name": tunnel_name})
-                    # 发送通知
-                    self.send_notification("node_offline",
-                                           f"节点 {node_name} 离线，正在尝试切换备用节点\n最后在线：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                                           node_name)
                     # 记录切换结果
                     if switched:
                         self.logger.info(f"隧道 {tunnel_name} 已成功切换到备用节点")
@@ -3695,11 +3751,11 @@ class MainWindow(QMainWindow):
             else:
                 self.logger.warning(f"未找到隧道 {tunnel_name} 的信息")
 
-        # 每10min检查一次所有隧道的域名配置是否需要更新
+        # 每10分钟检查一次所有隧道的域名配置
         current_time = time.time()
         last_check = getattr(self, 'last_domain_check_time', 0)
 
-        if current_time - last_check > 600:  # 每10min检查一次
+        if current_time - last_check > 600:  # 每10分钟
             self.last_domain_check_time = current_time
             self.check_domains_for_all_tunnels()
 
@@ -3737,19 +3793,51 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.logger.error(f"检查隧道域名配置时发生错误: {str(e)}")
 
-    # 添加节点上线检测
-    def check_new_nodes(self):
-        previous_nodes = set(self.last_node_list)
-        # 获取当前节点名称
-        current_nodes = set(n['node_name'] for n in API.is_node_online(tyen="all")['data'])
-        # 检测新上线的节点
-        new_nodes = current_nodes - previous_nodes
-        if new_nodes:
-            for node in new_nodes:
-                self.send_notification("node_online",
-                                       f"新节点上线：{node}\n上线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                                       node)
-            self.last_node_list = [n['node_name'] for n in API.is_node_online(tyen="all")['data']]
+    def check_node_status_changes(self):
+        """检测节点状态变化并发送相应通知"""
+        if not self.current_nodes or not self.previous_nodes:
+            return  # 没有足够的数据进行比较
+        print(self.current_nodes,self.previous_nodes)
+
+        # 创建字典，便于通过节点名查找节点信息
+        previous_nodes_dict = {node['node_name']: node for node in self.previous_nodes}
+        current_nodes_dict = {node['node_name']: node for node in self.current_nodes}
+
+        # 获取节点名称集合
+        previous_node_names = set(previous_nodes_dict.keys())
+        current_node_names = set(current_nodes_dict.keys())
+
+        # 1. 检测新节点上架 - 之前不存在，现在出现了
+        new_nodes = current_node_names - previous_node_names
+        for node_name in new_nodes:
+            self.logger.info(f"检测到新节点上架: {node_name}")
+            message = f"新节点上架：{node_name}\n上架时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            self.send_notification("node_added", message, node_name)
+
+        # 2. 检测节点下架 - 之前存在，现在消失了
+        removed_nodes = previous_node_names - current_node_names
+        for node_name in removed_nodes:
+            self.logger.info(f"检测到节点下架: {node_name}")
+            message = f"节点下架：{node_name}\n下架时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            self.send_notification("node_removed", message, node_name)
+
+        # 3. 检测状态变化 - 对于同时存在于两个列表中的节点
+        common_nodes = previous_node_names & current_node_names
+        for node_name in common_nodes:
+            previous_state = previous_nodes_dict[node_name].get('state')
+            current_state = current_nodes_dict[node_name].get('state')
+
+            # 节点重新上线 - 状态从离线变为在线
+            if previous_state != 'online' and current_state == 'online':
+                self.logger.info(f"检测到节点重新上线: {node_name}")
+                message = f"节点 {node_name} 重新上线\n上线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                self.send_notification("node_online", message, node_name)
+
+            # 节点离线 - 状态从在线变为离线
+            elif previous_state == 'online' and current_state != 'online':
+                self.logger.info(f"检测到节点离线: {node_name}")
+                message = f"节点 {node_name} 离线\n离线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                self.send_notification("node_offline", message, node_name)
 
     def batch_edit_tunnels(self):
         """批量编辑隧道"""
@@ -5062,47 +5150,120 @@ class MainWindow(QMainWindow):
     def load_nodes(self):
         """加载节点列表"""
         try:
-            nodes = API.is_node_online(tyen="all")['data']
-            # 提取节点名称并赋值给 self.last_node_list
-            self.last_node_list = [node['node_name'] for node in nodes]
+            if n_of_tunnels==0:
+                # 获取节点状态数据
+                response = API.is_node_online(tyen="all")
+                if response and 'data' in response and isinstance(response['data'], list):
+                    nodes = response['data']
 
-            # 清除现有的节点卡片
-            while self.node_container.layout().count():
-                item = self.node_container.layout().takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
+                    # 在更新当前状态前存储之前的状态
+                    self.previous_nodes = self.current_nodes.copy() if self.current_nodes else []
+                    self.current_nodes = nodes
 
-            row, col = 0, 0
+                    # 保持last_node_list以向后兼容，提取节点名称
+                    self.last_node_list = [node['node_name'] for node in nodes]
 
-            # 首先加载API状态卡片
-            try:
-                api_status = self.get_api_status()
-                api_widget = ApiStatusCard(api_status)
-                api_widget.clicked.connect(self.on_api_clicked)
-                self.node_container.layout().addWidget(api_widget, row, col)
+                    # 清除现有的节点卡片
+                    while self.node_container.layout().count():
+                        item = self.node_container.layout().takeAt(0)
+                        if item.widget():
+                            item.widget().deleteLater()
 
-                col += 1
-                if col == 2:  # 每行两个卡片
-                    col = 0
-                    row += 1
-            except Exception as e:
-                self.logger.error(f"创建API状态卡片时发生错误: {str(e)}")
+                    row, col = 0, 0
 
-            # 放置普通节点卡片
-            for node in nodes:
+                    # 首先加载API状态卡片
+                    try:
+                        api_status = self.get_api_status()
+                        api_widget = ApiStatusCard(api_status)
+                        api_widget.clicked.connect(self.on_api_clicked)
+                        self.node_container.layout().addWidget(api_widget, row, col)
+
+                        col += 1
+                        if col == 2:  # 每行两个卡片
+                            col = 0
+                            row += 1
+                    except Exception as e:
+                        self.logger.error(f"创建API状态卡片时发生错误: {str(e)}")
+
+                    # 放置普通节点卡片
+                    for node in nodes:
+                        try:
+                            # 确保node包含所有必需的字段
+                            if all(key in node for key in
+                                   ['node_name', 'state', 'nodegroup', 'bandwidth_usage_percent', 'cpu_usage']):
+                                node_widget = NodeCard(node)
+                                node_widget.clicked.connect(self.on_node_clicked)
+                                self.node_container.layout().addWidget(node_widget, row, col)
+
+                                col += 1
+                                if col == 2:  # 每行两个卡片
+                                    col = 0
+                                    row += 1
+                            else:
+                                self.logger.warning(f"节点数据缺少必要字段: {node}")
+
+                        except Exception as content:
+                            self.logger.error(f"创建节点卡片时发生错误: {str(content)}")
+                            continue
+                else:
+                    self.logger.error("获取节点数据失败或格式不正确")
+
+            # 获取节点状态数据
+            response = API.is_node_online(tyen="all")
+            if response and 'data' in response and isinstance(response['data'], list):
+                nodes = response['data']
+
+                # 在更新当前状态前存储之前的状态
+                self.previous_nodes = self.current_nodes.copy() if self.current_nodes else []
+                self.current_nodes = nodes
+
+                # 保持last_node_list以向后兼容，提取节点名称
+                self.last_node_list = [node['node_name'] for node in nodes]
+
+                # 清除现有的节点卡片
+                while self.node_container.layout().count():
+                    item = self.node_container.layout().takeAt(0)
+                    if item.widget():
+                        item.widget().deleteLater()
+
+                row, col = 0, 0
+
+                # 首先加载API状态卡片
                 try:
-                    node_widget = NodeCard(node)
-                    node_widget.clicked.connect(self.on_node_clicked)
-                    self.node_container.layout().addWidget(node_widget, row, col)
+                    api_status = self.get_api_status()
+                    api_widget = ApiStatusCard(api_status)
+                    api_widget.clicked.connect(self.on_api_clicked)
+                    self.node_container.layout().addWidget(api_widget, row, col)
 
                     col += 1
                     if col == 2:  # 每行两个卡片
                         col = 0
                         row += 1
+                except Exception as e:
+                    self.logger.error(f"创建API状态卡片时发生错误: {str(e)}")
 
-                except Exception as content:
-                    self.logger.error(f"创建节点卡片时发生错误: {str(content)}")
-                    continue
+                # 放置普通节点卡片
+                for node in nodes:
+                    try:
+                        # 确保node包含所有必需的字段
+                        if all(key in node for key in
+                               ['node_name', 'state', 'nodegroup', 'bandwidth_usage_percent', 'cpu_usage']):
+                            node_widget = NodeCard(node)
+                            node_widget.clicked.connect(self.on_node_clicked)
+                            self.node_container.layout().addWidget(node_widget, row, col)
+
+                            col += 1
+                            if col == 2:  # 每行两个卡片
+                                col = 0
+                                row += 1
+                        else:
+                            self.logger.warning(f"节点数据缺少必要字段: {node}")
+
+                    except Exception as content:
+                        self.logger.error(f"创建节点卡片时发生错误: {str(content)}")
+                        continue
+            else:
+                self.logger.error("获取节点数据失败或格式不正确")
 
         except Exception as content:
             self.logger.error(f"获取节点列表时发生错误: {str(content)}")
@@ -6464,6 +6625,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
     def auto_update(self):
         """自动更新函数"""
         if self.token:
+            # 更新节点并检查变化
             self.load_nodes()
 
     def update_log(self, message):
