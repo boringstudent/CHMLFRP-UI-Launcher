@@ -6,4 +6,5 @@ Dynamic_tunneling.json
 .idea/
 ce.py
 backup_config.json
-nssm-2.24/
+settings.json
+tunnel_comments.json
