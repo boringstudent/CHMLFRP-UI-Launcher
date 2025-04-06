@@ -39,8 +39,6 @@ jobs:
       - name: Build executable with Nuitka
         run: |
           python -m nuitka --standalone --python-flag=-O `
-          --include-data-files=./favicon.ico=./favicon.png `
-          --include-data-files=./favicon-d.ico=./favicon-d.png `
           --include-data-files=./favicon.ico=./favicon.ico `
           --include-data-files=./favicon-d.ico=./favicon-d.ico `
           --include-data-files=./CUL_update.exe=./CUL_update.exe `
@@ -56,7 +54,7 @@ jobs:
           --assume-yes-for-downloads `
           --output-dir=./build_output `
           --nofollow-import-to=psutil.tests,psutil.tests.test_testutils,dns.tests `
-          --windows-icon-from-ico=./favicon.png `
+          --windows-icon-from-ico=./favicon.ico `
           ./CHMLFRP_UI.py
       - name: Copy _internal directory to build output
         run: |
