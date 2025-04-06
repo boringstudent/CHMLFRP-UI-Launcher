@@ -3028,10 +3028,13 @@ class BackupNodeConfigDialog(QDialog):
             self.parent.logger.error(f"保存备用节点配置失败: {str(e)}")
             QMessageBox.warning(self, "错误", f"保存配置失败: {str(e)}")
 
+
 class MainWindow(QMainWindow):
     """主窗口"""
     def __init__(self):
         super().__init__()
+        self.a = []
+        self.b = []
         self.last_node_list = []
         self.current_nodes = []
         self.previous_nodes = []
@@ -3797,7 +3800,6 @@ class MainWindow(QMainWindow):
         """检测节点状态变化并发送相应通知"""
         if not self.current_nodes or not self.previous_nodes:
             return  # 没有足够的数据进行比较
-        print(self.current_nodes,self.previous_nodes)
 
         # 创建字典，便于通过节点名查找节点信息
         previous_nodes_dict = {node['node_name']: node for node in self.previous_nodes}
@@ -3807,37 +3809,95 @@ class MainWindow(QMainWindow):
         previous_node_names = set(previous_nodes_dict.keys())
         current_node_names = set(current_nodes_dict.keys())
 
-        # 1. 检测新节点上架 - 之前不存在，现在出现了
-        new_nodes = current_node_names - previous_node_names
-        for node_name in new_nodes:
-            self.logger.info(f"检测到新节点上架: {node_name}")
-            message = f"新节点上架：{node_name}\n上架时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            self.send_notification("node_added", message, node_name)
+        # 初始化持久化跟踪器（如果不存在）
+        if not hasattr(self, 'last_known_states'):
+            self.last_known_states = {}
+            # 初始化时，记录所有当前节点的状态
+            for node_name, node in current_nodes_dict.items():
+                self.last_known_states[node_name] = node.get('state', '')
 
-        # 2. 检测节点下架 - 之前存在，现在消失了
-        removed_nodes = previous_node_names - current_node_names
-        for node_name in removed_nodes:
-            self.logger.info(f"检测到节点下架: {node_name}")
-            message = f"节点下架：{node_name}\n下架时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            self.send_notification("node_removed", message, node_name)
+        # 检查每个节点是否相对于上次记录的状态发生了变化
+        nodes_went_offline = []
+        nodes_came_online = []
 
-        # 3. 检测状态变化 - 对于同时存在于两个列表中的节点
-        common_nodes = previous_node_names & current_node_names
-        for node_name in common_nodes:
-            previous_state = previous_nodes_dict[node_name].get('state')
-            current_state = current_nodes_dict[node_name].get('state')
+        # 检查哪些节点刚刚离线
+        for node_name in current_node_names:
+            current_state = current_nodes_dict[node_name].get('state', '')
+            last_known_state = self.last_known_states.get(node_name, '')
 
-            # 节点重新上线 - 状态从离线变为在线
-            if previous_state != 'online' and current_state == 'online':
-                self.logger.info(f"检测到节点重新上线: {node_name}")
-                message = f"节点 {node_name} 重新上线\n上线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                self.send_notification("node_online", message, node_name)
+            if current_state != 'online' and last_known_state == 'online':
+                # 节点刚刚从在线变为离线
+                nodes_went_offline.append(node_name)
+                self.logger.info(f"节点离线: {node_name} (上次已知状态: {last_known_state}, 当前状态: {current_state})")
+            elif current_state == 'online' and last_known_state != 'online' and last_known_state != '':
+                # 节点刚刚从离线变为在线
+                nodes_came_online.append(node_name)
+                self.logger.info(f"节点上线: {node_name} (上次已知状态: {last_known_state}, 当前状态: {current_state})")
 
-            # 节点离线 - 状态从在线变为离线
-            elif previous_state == 'online' and current_state != 'online':
-                self.logger.info(f"检测到节点离线: {node_name}")
-                message = f"节点 {node_name} 离线\n离线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                self.send_notification("node_offline", message, node_name)
+            # 更新跟踪器中的状态
+            self.last_known_states[node_name] = current_state
+
+        if nodes_went_offline:
+            self.logger.info(f"检测到 {len(nodes_went_offline)} 个节点刚刚离线: {', '.join(nodes_went_offline)}")
+
+        # 为每个新离线节点发送通知
+        for node_name in nodes_went_offline:
+            message = f"节点 {node_name} 离线\n离线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+            # 检查通知设置
+            if hasattr(self, 'notify_settings') and self.notify_settings.get('node_offline', False):
+                try:
+                    self.send_notification("node_offline", message, node_name)
+                except Exception:
+                    # 尝试直接发送
+                    if hasattr(self, 'mail_notifier') and self.mail_notifier is not None:
+                        try:
+                            computer_name = message_push.get_computer_name()
+                            subject = f"{APP_NAME} 节点离线通知"
+                            body = f"""
+                            通知类型：节点离线通知
+                            发生时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                            计算机名称：{computer_name}
+
+                            详细信息：
+                            {message}
+
+                            此邮件由 {APP_NAME} v{APP_VERSION} 自动发送
+                            """
+                            self.mail_notifier.send(subject, body)
+                        except Exception:
+                            pass
+
+        if nodes_came_online:
+            self.logger.info(f"检测到 {len(nodes_came_online)} 个节点刚刚上线: {', '.join(nodes_came_online)}")
+
+        # 为每个新上线节点发送通知
+        for node_name in nodes_came_online:
+            message = f"节点 {node_name} 重新上线\n上线时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+            # 检查通知设置
+            if hasattr(self, 'notify_settings') and self.notify_settings.get('node_online', False):
+                try:
+                    self.send_notification("node_online", message, node_name)
+                except Exception:
+                    # 尝试直接发送
+                    if hasattr(self, 'mail_notifier') and self.mail_notifier is not None:
+                        try:
+                            computer_name = message_push.get_computer_name()
+                            subject = f"{APP_NAME} 节点上线通知"
+                            body = f"""
+                            通知类型：节点上线通知
+                            发生时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                            计算机名称：{computer_name}
+
+                            详细信息：
+                            {message}
+
+                            此邮件由 {APP_NAME} v{APP_VERSION} 自动发送
+                            """
+                            self.mail_notifier.send(subject, body)
+                        except Exception:
+                            pass
 
     def batch_edit_tunnels(self):
         """批量编辑隧道"""
