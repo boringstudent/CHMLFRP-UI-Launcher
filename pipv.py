@@ -12,4 +12,3 @@
 
 # 镜像源
 # 阿里云 http://mirrors.aliyun.com/pypi/simple/
-
