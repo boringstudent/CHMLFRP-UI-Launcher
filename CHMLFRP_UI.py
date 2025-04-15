@@ -1074,76 +1074,45 @@ class DomainCard(QFrame):
             self.clicked.emit(self.domain_info)
         super().mousePressEvent(event)
 
-class StopWorker(QObject):
-    finished = pyqtSignal()
-    progress = pyqtSignal(str)
 
-    def __init__(self, running_tunnels, tunnel_processes, stop_logger):
-        super().__init__()
-        self.running_tunnels = running_tunnels
-        self.tunnel_processes = tunnel_processes
-        self.logger = stop_logger
+def kill_remaining_frpc_processes():
+    """
+    强制终止所有残留的 frpc.exe 进程。
+    """
+    print("正在清理残留的 frpc.exe 进程...")
+    killed_count = 0
 
-    def run(self):
-        self.progress.emit("开始停止所有隧道...")
+    try:
+        # 获取当前目录下的 frpc.exe 完整路径
+        frpc_path = os.path.join(os.getcwd(), 'frpc.exe').replace('\\', '\\\\')  # 转义反斜杠
 
-        # 停止普通隧道
-        for tunnel_name in list(self.tunnel_processes.keys()):
-            self.stop_single_tunnel(tunnel_name, is_dynamic=False)
-        # 确保所有 frpc.exe 进程都被终止
-        self.kill_remaining_frpc_processes()
-        self.progress.emit("所有隧道已停止")
-        self.finished.emit()
+        # 构造 PowerShell 命令
+        ps_command = (
+            f'powershell -Command "Get-Process | Where-Object {{ $_.Path -eq \'{frpc_path}\' }} | '
+            'Stop-Process -Force"'
+        )
 
-    def stop_single_tunnel(self, tunnel_name, is_dynamic):
-        self.progress.emit(f"正在停止隧道: {tunnel_name}")
-        if is_dynamic:
-            worker = self.running_tunnels.get(tunnel_name)
-            if worker:
-                worker.requestInterruption()
-                if not worker.wait(5000):  # 等待最多5秒
-                    worker.terminate()
-                    worker.wait(2000)
-                del self.running_tunnels[tunnel_name]
-        else:
-            process = self.tunnel_processes.get(tunnel_name)
-            if process:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                del self.tunnel_processes[tunnel_name]
+        # 执行 PowerShell 命令（同步执行，阻塞当前线程）
+        result = subprocess.run(
+            ps_command,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True
+        )
 
-        self.logger.info(f"隧道 '{tunnel_name}' 已停止")
-
-    def kill_remaining_frpc_processes(self):
-        self.progress.emit("正在清理残留的 frpc.exe 进程...")
-        killed_count = 0
-
-        try:
-            # 获取当前目录下的 frpc.exe 完整路径
-            frpc_path = get_absolute_path('frpc.exe').replace('\\', '\\\\')  # 转义反斜杠
-
-            ps_command = (
-                f'powershell -Command "Get-Process | Where-Object {{ $_.Path -eq \'{frpc_path}\' }} | '
-                'Stop-Process -Force"'
-            )
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
-
-            subprocess.Popen(ps_command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             startupinfo=startupinfo)
+        if result.returncode == 0:
             killed_count += 1
-            self.logger.info("已通过 PowerShell 强制终止 frpc.exe 进程")
-        except Exception as content:
-            self.logger.error(f"使用 PowerShell 终止 frpc.exe 时发生错误: {str(content)}")
-
-        if killed_count > 0:
-            self.progress.emit(f"已终止 {killed_count} 个残留的 frpc.exe 进程")
+            print("已通过 PowerShell 强制终止 frpc.exe 进程")
         else:
-            self.progress.emit("没有发现残留的 frpc.exe 进程")
+            print("未找到残留的 frpc.exe 进程")
+    except Exception as content:
+        print(f"使用 PowerShell 终止 frpc.exe 时发生错误: {str(content)}")
+
+    if killed_count > 0:
+        print(f"已终止 {killed_count} 个残留的 frpc.exe 进程")
+    else:
+        print("没有发现残留的 frpc.exe 进程")
 
 class OutputDialog(QDialog):
     """隧道输出对话框"""
@@ -2140,13 +2109,14 @@ class UpdateCheckerDialog(QDialog):
                 except psutil.NoSuchProcess:
                     pass
 
-            subprocess.run(["taskkill", "/f", "/im", "frpc.exe"],
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
+            # 调用 kill_remaining_frpc_processes 函数清理残留的 frpc.exe 进程
+            # 这个函数是阻塞执行的，会等待所有 frpc.exe 进程被终止
+            kill_remaining_frpc_processes()
 
         except Exception as e:
-            logger.error(f"清理进程时出错: {str(e)}")
+            self.logger.error(f"清理进程时出错: {str(e)}")
 
+        # 退出应用
         QApplication.quit()
 
     def apply_theme(self, is_dark):
@@ -3204,7 +3174,7 @@ class MainWindow(QMainWindow):
         min_button = QPushButton("－")
         min_button.clicked.connect(self.showMinimized)
         close_button = QPushButton("×")
-        close_button.clicked.connect(self.close)
+        close_button.clicked.connect(self.quit_application)
 
         title_layout.addWidget(min_button)
         title_layout.addWidget(close_button)
@@ -3804,6 +3774,7 @@ class MainWindow(QMainWindow):
         # 获取节点名称集合
         previous_node_names = set(previous_nodes_dict.keys())
         current_node_names = set(current_nodes_dict.keys())
+
 
         # 初始化持久化跟踪器（如果不存在）
         if not hasattr(self, 'last_known_states'):
@@ -6739,58 +6710,13 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         if event.button() == Qt.MouseButton.LeftButton:
             self.dragging = False
 
-    def forcefully_terminate_frpc(self):
-        self.logger.info("正在终止当前目录下的 frpc.exe 进程...")
-        current_directory = os.path.dirname(os.path.abspath(__file__))  # 获取当前脚本目录
-        frpc_path = os.path.join(current_directory, 'frpc.exe')  # 当前目录下的 frpc.exe 完整路径
-
-        # 检查 frpc.exe 是否存在
-        if not os.path.exists(frpc_path):
-            self.logger.error(f"{frpc_path} 不存在")
-            return False
-
-        # 封装进程终止逻辑
-        def terminate_process(proc_id):
-            try:
-                self.logger.info(f"正在终止进程: {proc_id.info['pid']} - {frpc_path}")
-                proc_id.terminate()  # 终止进程
-                proc_id.wait()  # 等待进程完全结束
-                self.logger.info(f"进程 {proc_id.info['pid']} 已终止")
-            except psutil.NoSuchProcess:
-                self.logger.error(f"进程 {proc_id.info['pid']} 已不存在")
-            except psutil.AccessDenied:
-                self.logger.error(f"访问被拒绝，无法终止进程 {proc_id.info['pid']}")
-            except Exception as _content:
-                self.logger.error(f"终止进程 {proc_id.info['pid']} 时发生错误: {str(_content)}")
-
-        try:
-            # psutil 获取所有进程
-            for proc in psutil.process_iter(['pid', 'exe']):
-                # 检查进程路径是否与指定路径匹配
-                if proc.info['exe'] and os.path.normpath(proc.info['exe']) == os.path.normpath(frpc_path):
-                    terminate_process(proc)  # 调用封装的终止进程函数
-
-            self.logger.info("所有匹配的 frpc.exe 进程已终止")
-            return True
-        except psutil.NoSuchProcess:
-            self.logger.error("未找到指定的 frpc.exe 进程")
-            return False
-        except psutil.AccessDenied:
-            self.logger.error("访问被拒绝。您可能需要以管理员身份运行")
-            return False
-        except Exception as content:
-            self.logger.error(f"终止 frpc.exe 进程时发生错误: {str(content)}")
-            return False
-
     def cleanup(self):
         # 停止所有普通隧道
         for tunnel_name, process in list(self.tunnel_processes.items()):
             self.stop_tunnel({"name": tunnel_name})
 
-        # 强制终止所有 frpc 进程
-        self.forcefully_terminate_frpc()
-
-        time.sleep(1)
+        # 强制终止所有 frpc 进程（阻塞执行）
+        kill_remaining_frpc_processes()
 
         # 等待所有线程结束
         QThreadPool.globalInstance().waitForDone()
