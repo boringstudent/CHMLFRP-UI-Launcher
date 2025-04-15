@@ -3119,10 +3119,6 @@ class MainWindow(QMainWindow):
         self.set_taskbar_icon()
         self.setup_system_tray()
 
-        self.node_check_timer = QTimer(self)
-        self.node_check_timer.timeout.connect(self.check_node_status_changes)
-        self.node_check_timer.start(100)
-
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.auto_update)
         self.update_timer.start(40000)  # 40秒更新一次
@@ -5231,6 +5227,8 @@ class MainWindow(QMainWindow):
 
                     row, col = 0, 0
 
+                    self.check_node_status_changes() #节点检测
+
                     # 首先加载API状态卡片
                     try:
                         api_status = self.get_api_status()
@@ -6687,6 +6685,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
         if self.token:
             # 更新节点并检查变化
             self.load_nodes()
+
 
     def update_log(self, message):
         """更新日志显示"""
