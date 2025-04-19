@@ -34,7 +34,7 @@ urllib3.disable_warnings()
 
 # ------------------------------以下为程序信息--------------------
 APP_NAME = "CUL" # 程序名称
-APP_VERSION = "1.6.6" # 程序版本
+APP_VERSION = "1.6.7" # 程序版本
 PY_VERSION = "3.13.*" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
@@ -51,7 +51,7 @@ def exception_hook(exctype, value, main_thread):
 def get_mirrors():
     """
     获取可用的GitHub镜像站点列表
-    返回：按API返回顺序的镜像站点列表（去除http/https前缀），过滤掉速度为0的站点
+    返回：按API返回顺序的镜像站点列表（去除http/https前缀），过滤掉速度小于等于1的站点以及IPv6地址的站点
     """
     # 默认备用镜像列表
     DEFAULT_MIRRORS = [
@@ -69,8 +69,11 @@ def get_mirrors():
         # 检查API返回状态码
         if data.get("code") == 200:
             mirrors = data.get("data", [])  # 获取镜像数据，如果不存在则返回空列表
-            # 过滤掉速度为0的镜像
-            valid_mirrors = [mirror for mirror in mirrors if mirror.get("speed", 0) > 0]
+            # 过滤掉速度小于等于1的镜像以及IPv6地址的镜像
+            valid_mirrors = [
+                mirror for mirror in mirrors
+                if mirror.get("speed", 0) > 1 and ":" not in mirror.get("ip", "")
+            ]
             # 提取镜像URL并去除协议前缀
             MIRROR_PREFIXES = [
                 mirror["url"].replace("https://", "").replace("http://", "").strip()
@@ -277,7 +280,7 @@ class ProgramUpdates():
 
             # 2. 构建请求
             headers = {"Host": DNS_CONFIG["domain"]} if re.match(r"\d+\.\d+\.\d+\.\d+", endpoint) else {}
-            url = f"https://{endpoint}/repos/boringstudents/CHMLFRP-UI-Launcher/releases/latest"
+            url = f"https://api.github.com/repos/boringstudents/CHMLFRP-UI-Launcher/releases/latest"
 
             # 3. 获取版本信息
             response = requests.get(url, headers=headers, timeout=DNS_CONFIG["timeout"], verify=False)
@@ -302,7 +305,8 @@ class ProgramUpdates():
             for asset in release_data.get("assets", []):
                 original_url = asset.get("browser_download_url", "")
                 if not original_url: continue
-                urls = [f"https://{prefix}/{original_url}" for prefix in MIRROR_PREFIXES] + [original_url]
+                urls = [f"https://{prefix}/{original_url}" for prefix in MIRROR_PREFIXES] + [enter_inspector.remove_http_https(original_url)]
+                print(urls)
                 download_links.extend(urls)
 
             return latest_version, update_content, download_links
@@ -409,7 +413,7 @@ class enter_inspector():
 
     @staticmethod
     def remove_http_https(url):
-        """htpp头去除"""
+        """去除 http 和 https 头"""
         return re.sub(r'^https?://', '', url)
 
     @staticmethod
@@ -7300,8 +7304,8 @@ if __name__ == '__main__':
     try:
         sys.excepthook = exception_hook
         # 获取镜像地址
-        MIRROR_PREFIXES = get_mirrors()
         Pre_run_operations.document_checking()  # 配置文件检查
+        MIRROR_PREFIXES = get_mirrors()
         app = QApplication(sys.argv)
         main_window = MainWindow()
         main_window.show()
