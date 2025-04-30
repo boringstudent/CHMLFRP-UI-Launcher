@@ -34,7 +34,7 @@ urllib3.disable_warnings()
 
 # ------------------------------以下为程序信息--------------------
 APP_NAME = "CUL" # 程序名称
-APP_VERSION = "1.6.7" # 程序版本
+APP_VERSION = "1.6.8" # 程序版本
 PY_VERSION = "3.13.*" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
@@ -1311,87 +1311,6 @@ class SettingsDialog(QDialog):
         tunnel_layout.addWidget(tunnel_note)
 
         tab_widget.addTab(tunnel_tab, "隧道")
-        # === 关于标签页 ===
-        about_tab = QWidget()
-        about_layout = QVBoxLayout(about_tab)
-        about_layout.setSpacing(15)
-
-        # Logo图片
-        logo_label = QLabel()
-        logo_pixmap = QPixmap("/api/placeholder/100/100")  # 100x100 的占位图
-        logo_label.setPixmap(logo_pixmap)
-        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_label.setStyleSheet("margin-top: 20px;")
-        about_layout.addWidget(logo_label)
-
-        # 标题
-        title_label = QLabel(APP_NAME)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold; margin: 10px 0px;")
-        about_layout.addWidget(title_label)
-
-        # 版本信息
-        version_label = QLabel(f"Version {APP_VERSION}")
-        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        version_label.setStyleSheet("font-size: 14px; color: #666666;")
-        about_layout.addWidget(version_label)
-
-        # 描述文本
-        desc_text = QTextBrowser()  # 使用QTextBrowser代替QTextEdit以支持链接点击
-        desc_text.setOpenLinks(True)  # 允许打开链接
-        desc_text.setOpenExternalLinks(True)  # 在外部浏览器中打开链接
-        desc_text.setStyleSheet("""
-                    QTextBrowser {
-                        border: 1px solid #cccccc;
-                        border-radius: 5px;
-                        padding: 10px;
-                        background-color: transparent;
-                    }
-                    QTextBrowser:hover {
-                        border-color: #999999;
-                    }
-                """)
-
-        desc_text.setHtml(f"""
-                    <div style="text-align: center; margin-bottom: 20px;">
-                        <p style="font-size: 14px; line-height: 1.6;">
-                            基于chmlfrp api开发的chmlfrp ui版本的客户端<br>
-                            如有bug请提出谢谢!
-                        </p>
-                        <p style="color: #666666;">
-                            有bug请投稿至 <a href="mailto:boring_student@qq.com" style="color: #0066cc;">boring_student@qq.com</a>
-                        </p>
-                    </div>
-
-                    <div style="margin: 20px 0;">
-                        <h3 style="color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 8px;">相关链接</h3>
-                        <ul style="list-style-type: none; padding-left: 0;">
-                            <li style="margin: 8px 0;"><a href="https://github.com/Qianyiaz/ChmlFrp_Professional_Launcher" style="color: #0066cc; text-decoration: none;">▸ 千依🅥的cpl</a></li>
-                            <li style="margin: 8px 0;"><a href="https://github.com/FengXiangqaq/Xingcheng-Chmlfrp-Lanucher" style="color: #0066cc; text-decoration: none;">▸ 枫相的xcl2</a></li>
-                            <li style="margin: 8px 0;"><a href="https://github.com/boringstudents/CHMLFRP_UI" style="color: #0066cc; text-decoration: none;">▸ 我的"不道a"</a></li>
-                            <li style="margin: 8px 0;"><a href="https://github.com/TechCat-Team/ChmlFrp-Frp" style="color: #0066cc; text-decoration: none;">▸ chmlfrp官方魔改的frpc</a></li>
-                        </ul>
-                    </div>
-
-                    <div style="margin: 20px 0;">
-                        <h3 style="color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 8px;">API文档</h3>
-                        <ul style="list-style-type: none; padding-left: 0;">
-                            <li style="margin: 8px 0;"><a href="https://docs.northwind.top/#/" style="color: #0066cc; text-decoration: none;">▸ 群友的api文档</a></li>
-                            <li style="margin: 8px 0;"><a href="https://apifox.com/apidoc/shared-24b31bd1-e48b-44ab-a486-81cf5f964422/" style="color: #0066cc; text-decoration: none;">▸ 官方api v2文档</a></li>
-                        </ul>
-                    </div>
-
-                    <div style="text-align: center; margin-top: 20px;">
-                        <p style="margin: 8px 0;"><a href="http://chmlfrp.cn" style="color: #0066cc; text-decoration: none;">官网：chmlfrp.cn</a></p>
-                        <p style="margin: 8px 0;"><a href="http://panel.chmlfrp.cn" style="color: #0066cc; text-decoration: none;">v2控制面板：panel.chmlfrp.cn</a></p>
-                        <p style="margin: 8px 0;"><a href="http://preview.panel.chmlfrp.cn" style="color: #0066cc; text-decoration: none;">v3控制面板：preview.panel.chmlfrp.cn</a></p>
-                    </div>
-                """)
-        desc_text.setMinimumHeight(300)
-        about_layout.addWidget(desc_text)
-
-        about_layout.addStretch()
-        tab_widget.addTab(about_tab, "关于")
 
         # === 底部按钮 ===
         button_layout = QHBoxLayout()
@@ -3160,7 +3079,7 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(icon_label)
 
         # 添加标题文本
-        title_label = QLabel(APP_NAME + "-ChmlFrp第三方启动器")
+        title_label = QLabel(APP_NAME + f"-ChmlFrp第三方启动器 v{APP_VERSION}")
         title_layout.addWidget(title_label)
         title_layout.addStretch(1)
 
@@ -3797,19 +3716,15 @@ class MainWindow(QMainWindow):
             last_known_state = self.last_known_states.get(node_name, '')
 
             if current_state != 'online' and last_known_state == 'online':
-                # 节点刚刚从在线变为离线
+                # 节点从在线变为离线
                 nodes_went_offline.append(node_name)
-                self.logger.info(f"节点离线: {node_name} (上次已知状态: {last_known_state}, 当前状态: {current_state})")
             elif current_state == 'online' and last_known_state != 'online' and last_known_state != '':
-                # 节点刚刚从离线变为在线
+                # 节点从离线变为在线
                 nodes_came_online.append(node_name)
-                self.logger.info(f"节点上线: {node_name} (上次已知状态: {last_known_state}, 当前状态: {current_state})")
 
             # 更新跟踪器中的状态
             self.last_known_states[node_name] = current_state
 
-        if nodes_went_offline:
-            self.logger.info(f"检测到 {len(nodes_went_offline)} 个节点刚刚离线: {', '.join(nodes_went_offline)}")
 
         # 为每个新离线节点发送通知
         for node_name in nodes_went_offline:
@@ -3838,9 +3753,6 @@ class MainWindow(QMainWindow):
                             self.mail_notifier.send(subject, body)
                         except Exception:
                             pass
-
-        if nodes_came_online:
-            self.logger.info(f"检测到 {len(nodes_came_online)} 个节点刚刚上线: {', '.join(nodes_came_online)}")
 
         # 为每个新上线节点发送通知
         for node_name in nodes_came_online:
@@ -6455,9 +6367,7 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
 
                 if enter_inspector.is_valid_domain(srv_target):
                     srv_target = enter_inspector.remove_http_https(srv_target)
-                elif not (enter_inspector.is_valid_ipv4(srv_target) or enter_inspector.is_valid_ipv6(srv_target)):
-                    QMessageBox.warning(self, "无效SRV目标", "SRV目标必须是有效的域名或IP地址")
-                    return
+
 
                 target = f"{priority_input.text()} {weight_input.text()} {port_input.text()} {srv_target}"
 
@@ -6591,11 +6501,6 @@ CPU使用率: {node_info.get('cpu_usage', 'N/A')}%
                     srv_target = target
                     if ':' in srv_target:  # 可能是IPv6
                         srv_target = f"[{srv_target}]"
-
-                    if not enter_inspector.is_valid_domain(srv_target) and not enter_inspector.is_valid_ipv4(srv_target) and not enter_inspector.is_valid_ipv6(
-                    srv_target.strip('[]')):
-                        QMessageBox.warning(self, "无效SRV目标", "SRV目标必须是有效的域名或IP地址")
-                        return
 
                     target = f"{priority_input.text()} {weight_input.text()} {port_input.text()} {srv_target}"
 
