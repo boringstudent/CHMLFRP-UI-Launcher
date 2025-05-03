@@ -384,7 +384,7 @@ class Pre_run_operations():
                 key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\ChmlFrp")
                 winreg.SetValueEx(key, "username", 0, winreg.REG_SZ, credentials.get('username', ''))
                 winreg.SetValueEx(key, "password", 0, winreg.REG_SZ, credentials.get('password', ''))
-                winreg.SetValueEx(key, "token", 0, winreg.REG_SZ, credentials.get('token', ''))
+                winreg.SetValueEx(key, "usertoken", 0, winreg.REG_SZ, credentials.get('token', ''))
                 winreg.CloseKey(key)
 
                 # 删除旧文件
@@ -4762,7 +4762,7 @@ class MainWindow(QMainWindow):
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\ChmlFrp", 0, winreg.KEY_READ)
             username = winreg.QueryValueEx(key, "username")[0]
             password = winreg.QueryValueEx(key, "password")[0]
-            token = winreg.QueryValueEx(key, "token")[0]
+            token = winreg.QueryValueEx(key, "usertoken")[0]
             winreg.CloseKey(key)
             self.username_input.setText(username)
             self.password_input.setText(password)
@@ -4783,7 +4783,7 @@ class MainWindow(QMainWindow):
             key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\ChmlFrp")
             winreg.SetValueEx(key, "username", 0, winreg.REG_SZ, self.username_input.text())
             winreg.SetValueEx(key, "password", 0, winreg.REG_SZ, self.password_input.text())
-            winreg.SetValueEx(key, "token", 0, winreg.REG_SZ, self.token_input.text())
+            winreg.SetValueEx(key, "usertoken", 0, winreg.REG_SZ, self.token_input.text())
             winreg.CloseKey(key)
         except PermissionError:
             self.logger.error("权限不足，无法写入注册表。请以管理员身份运行程序。")
@@ -4906,7 +4906,7 @@ class MainWindow(QMainWindow):
             except WindowsError:
                 pass
             try:
-                winreg.DeleteValue(key, "token")
+                winreg.DeleteValue(key, "usertoken")
             except WindowsError:
                 pass
             winreg.CloseKey(key)
