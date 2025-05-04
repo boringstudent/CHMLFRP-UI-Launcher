@@ -34,7 +34,7 @@ urllib3.disable_warnings()
 
 # ------------------------------以下为程序信息--------------------
 APP_NAME = "CUL" # 程序名称
-APP_VERSION = "1.6.8" # 程序版本
+APP_VERSION = "1.6.9" # 程序版本
 PY_VERSION = "3.13.*" # Python 版本
 WINDOWS_VERSION = "Windows NT 10.0" # 系统版本
 Number_of_tunnels = 0 # 隧道数量
@@ -646,7 +646,7 @@ class TunnelCard(QFrame):
         layout.addWidget(self.start_stop_button)
 
         self.setLayout(layout)
-        self.setFixedSize(250, 280)
+        self.setFixedSize(270, 290)
 
     def load_comment(self):
         """Load and display the comment for this tunnel"""
