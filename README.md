@@ -12,7 +12,7 @@ CUL顾名思义为CHMLFRP-UI-Launcher
 肯定没bug，有的话找吃了
 
 ## 相关链接
-[https://cpl.chmlfrp.com](https://cpl.chmlfrp.com)  #千依🅥的cpl
+[https://cat.chmlfrp.com](https://cpl.chmlfrp.com)  #千依🅥的cat
 
 [https://xcl.chmlfrp.com](https://xcl.chmlfrp.com)  #枫相的xcl2
 
@@ -23,7 +23,7 @@ CUL顾名思义为CHMLFRP-UI-Launcher
 ---
 
 ## **chmlfrp有关链接**
-### ChmlFrp-v3控制面板链接：[http://v3.chmlfrp.com](http://v3.chmlfrp.com)
+### ChmlFrp-v3控制面板链接：[http://panel.chmlfrp.com](http://panel.chmlfrp.com)
 
 开源链接：[https://github.com/TechCat-Team/ChmlFrp-Panel-v3](https://github.com/TechCat-Team/ChmlFrp-Panel-v3)
 
@@ -32,7 +32,7 @@ CUL顾名思义为CHMLFRP-UI-Launcher
 ---
 
 ## api文档链接
-这是群友的api文档[https://docs.apiv1.chmlfrp.com](https://docs.apiv1.chmlfrp.com)
+这是群友的api文档[https://docs.api.chmlfrp.com](https://docs.api.chmlfrp.com)
 
 这是官方api v2文档[https://docs.apiv2.chmlfrp.com](https://docs.apiv2.chmlfrp.com)
 
