@@ -5090,7 +5090,6 @@ class TunnelManagementPage(QWidget):
                 existing_dialog.activateWindow()
                 existing_dialog.force_refresh()
 
-
 class DomainCard(CardWidget):
     """域名卡片"""
     selectionChanged = pyqtSignal(bool)
@@ -5217,7 +5216,6 @@ class DomainCard(CardWidget):
             parent=self.window()
         )
 
-
 class DomainLoaderThread(QThread):
     """域名加载线程"""
     dataLoaded = pyqtSignal(dict)
@@ -5239,7 +5237,6 @@ class DomainLoaderThread(QThread):
             self.dataLoaded.emit({"code": 500, "msg": f"网络错误: {str(e)}"})
         finally:
             self.quit()
-
 
 class DomainDeleteThread(QThread):
     """域名删除线程"""
@@ -5279,7 +5276,6 @@ class DomainDeleteThread(QThread):
         finally:
             self.quit()
 
-
 class AvailableDomainsThread(QThread):
     """获取可用域名列表线程"""
     dataLoaded = pyqtSignal(dict)
@@ -5297,7 +5293,6 @@ class AvailableDomainsThread(QThread):
             self.dataLoaded.emit({"code": 500, "msg": f"网络错误: {str(e)}"})
         finally:
             self.quit()
-
 
 class DomainCreateThread(QThread):
     """创建域名线程"""

@@ -3,6 +3,8 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/boringstudent/CHMLFRP-UI-Launcher)
 
+**本项目 CDN 加速及安全防护由 Tencent EdgeOne 赞助**
+
 CUL原名CHMLFRP_UI
 
 CUL顾名思义为CHMLFRP-UI-Launcher
