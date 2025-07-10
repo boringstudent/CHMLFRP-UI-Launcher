@@ -8,3 +8,4 @@ ce.py
 backup_config.json
 settings.json
 tunnel_comments.json
+build_output/

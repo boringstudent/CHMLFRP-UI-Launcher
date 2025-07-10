@@ -1,8 +1,8 @@
 requests==2.32.3
+PyQt6==6.9.0
 ipaddress==1.0.23
 psutil==7.0.0
 pyperclip==1.9.0
 Markdown==3.7
 urllib3==2.4.0
-PyQt6==6.9.0
 dnspython==2.7.0
