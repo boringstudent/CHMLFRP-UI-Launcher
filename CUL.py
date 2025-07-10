@@ -8433,5 +8433,5 @@ if __name__ == "__main__":
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
-
+# CHMLFRP_UI_2025_07_10
 # python -m nuitka --standalone --python-flag=-O --include-data-files=./favicon.ico=./favicon.ico --include-data-files=./frpc.exe=./frpc.exe --include-package=PyQt6 --include-package-data=PyQt6 --include-qt-plugins=styles,platforms,qml --plugin-enable=pyqt6 --follow-import-to=PyQt6,PyQt6.QtCore,PyQt6.QtGui,PyQt6.QtWidgets,ipaddress,requests --remove-output --windows-console-mode=disable --assume-yes-for-downloads --output-dir=./build_output --nofollow-import-to=psutil.tests,psutil.tests.test_testutils,dns.tests --windows-icon-from-ico=./favicon.ico CUL.py
