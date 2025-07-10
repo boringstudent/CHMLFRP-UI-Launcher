@@ -1,0 +1,27 @@
+{
+    "theme": "light",
+    "auto_start": false,
+    "user_token": "G5qlzexH6klhjTojE5cpX86f",
+    "username": "boring_student",
+    "password": "",
+    "auto_start_tunnels": [],
+    "email_enabled": false,
+    "sender_email": "boring_student@qq.com",
+    "sender_password": "yzaarjtienvvcaae",
+    "receiver_email": "boring_student@qq.com",
+    "notify_login": false,
+    "notify_tunnel_status": false,
+    "notify_node_status": false,
+    "email_notifications": {
+        "enabled": true,
+        "email": "boring_student@qq.com",
+        "password": "yzaarjtienvvcaae",
+        "login_notify": false,
+        "tunnel_start": false,
+        "tunnel_stop": true,
+        "node_add": true,
+        "node_remove": true,
+        "node_online": true,
+        "node_offline": true
+    }
+}
