@@ -3,7 +3,8 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/boringstudent/CHMLFRP-UI-Launcher)
 
-**本项目 CDN 加速及安全防护由 Tencent EdgeOne 赞助**
+<img width="2163" height="308" alt="393579e7-31c8-4655-a651-bccba13b7421" src="https://github.com/user-attachments/assets/375482dc-20c5-463e-8a76-ae51fd6e7cfd" />
+本项目 CDN 加速及安全防护由 Tencent EdgeOne 赞助：EdgeOne 提供长期有效的免费套餐，包含不限量的流量和请求，覆盖中国大陆节点，且无任何超额收费，感兴趣的朋友可以点击下面的链接领取[亚洲最佳CDN、边缘和安全解决方案 - Tencent EdgeOne](https://edgeone.ai/zh?from=github)
 
 CUL原名CHMLFRP_UI
 
