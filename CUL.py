@@ -18,6 +18,7 @@ import logging
 import requests
 import winreg
 
+
 REG_PATH = r"Software\ChmlFrp"
 APP_NAME = "CUL"  # 程序名称
 APP_VERSION = "2.0.0"  # 程序版本
@@ -7625,8 +7626,11 @@ class NodeStatusPage(QWidget):
         self.mainLayout.addWidget(self.scrollArea)
         self.refreshData()
 
-        self.format_traffic = lambda \
-                bytes: f"{bytes / 1024 ** 2:.1f} MB" if bytes < 1024 ** 3 else f"{bytes / 1024 ** 3:.1f} GB"
+        self.format_traffic = lambda b: (
+            f"{b / 1024 ** 2:.1f} MB" if b is not None and b < 1024 ** 3
+            else f"{b / 1024 ** 3:.1f} GB" if b is not None
+            else "0 MB"
+        )
 
         self.refreshTimer = QTimer()
         self.refreshTimer.timeout.connect(self.refreshData)
@@ -8428,5 +8432,5 @@ if __name__ == "__main__":
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
-# CHMLFRP_UI_2025_07_10
+# CHMLFRP_UI_2025_07_28
 # python -m nuitka --standalone --python-flag=-O --include-data-files=./favicon.ico=./favicon.ico --include-data-files=./frpc.exe=./frpc.exe --include-package=PyQt6 --include-package-data=PyQt6 --include-qt-plugins=styles,platforms,qml --plugin-enable=pyqt6 --follow-import-to=PyQt6,PyQt6.QtCore,PyQt6.QtGui,PyQt6.QtWidgets,ipaddress,requests --remove-output --windows-console-mode=disable --assume-yes-for-downloads --output-dir=./build_output --nofollow-import-to=psutil.tests,psutil.tests.test_testutils,dns.tests --windows-icon-from-ico=./favicon.ico CUL.py
